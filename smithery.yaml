@@ -1,0 +1,41 @@
+# Smithery configuration for Bizfile MCP
+# https://smithery.ai/docs/config
+
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    properties:
+      anthropicApiKey:
+        type: string
+        description: "Your Anthropic API key from console.anthropic.com"
+        x-from:
+          header: "x-anthropic-api-key"
+      companiesHouseApiKey:
+        type: string
+        description: "UK Companies House API key (free at developer.company-information.service.gov.uk) — unlocks full UK company data"
+        x-from:
+          header: "x-companies-house-api-key"
+    required: []
+  url: https://bizfile-mcp-production.up.railway.app
+
+systemPrompt: |
+  You have access to Bizfile MCP, a company intelligence server providing real-time data from official government registries worldwide.
+
+  Available tools:
+  - search_company: Find any company by name across 130+ jurisdictions
+  - get_company_profile: Full company details including status, address, filings, and officers
+  - verify_company: KYC-style verification with confidence rating (HIGH/MEDIUM/LOW)
+  - check_company_risk: AI risk score 0-100 with due diligence recommendations
+  - get_officers: Directors and officers with appointment history (UK companies)
+
+  Best practice workflow:
+  1. Use search_company to find the company and get its registration number
+  2. Use get_company_profile with the registration number for full details
+  3. Use check_company_risk for due diligence
+  4. Use verify_company for KYC and onboarding
+  5. Use get_officers with jurisdiction: gb for UK beneficial ownership checks
+
+  Jurisdiction codes: gb (UK), sg (Singapore), us (USA), ie (Ireland), au (Australia)
+
+  All data is fetched live from official government registries. No hallucinated company data.
