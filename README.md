@@ -1,4 +1,4 @@
-# <!-- mcp-name: bizfile-mcp -->
+# <!-- mcp-name: io.github.OjasKord/bizfile-mcp -->
 
 # 
 
@@ -18,70 +18,70 @@ Built for compliance, KYC, and due diligence workflows running inside AI agents.
 
 ## Tools
 
-### `search\_company`
+### `search\\\_company`
 
 Search for any company by name across UK Companies House, Singapore ACRA, and OpenCorporates (130+ jurisdictions).
 
 **Example:**
 
 ```json
-{ "company\_name": "Shell", "country": "UK" }
+{ "company\\\_name": "Shell", "country": "UK" }
 ```
 
 **Returns:** List of matching companies with registration numbers, status, jurisdiction, incorporation date, and registry URLs.
 
 \---
 
-### `get\_company\_profile`
+### `get\\\_company\\\_profile`
 
 Get a full company profile including registration status, registered address, SIC codes, filing history, accounts status, and key officers.
 
 **Example:**
 
 ```json
-{ "company\_name": "Shell PLC", "registration\_number": "04366849", "jurisdiction": "gb" }
+{ "company\\\_name": "Shell PLC", "registration\\\_number": "04366849", "jurisdiction": "gb" }
 ```
 
 **Returns:** Complete company record with filing history URL, SIC codes, accounts, and officer list.
 
 \---
 
-### `verify\_company`
+### `verify\\\_company`
 
 KYC-style verification of a company across multiple registries. Returns a confidence rating (HIGH / MEDIUM / LOW), verified status, and any discrepancies found.
 
 **Example:**
 
 ```json
-{ "company\_name": "Accenture Singapore", "country": "SG" }
+{ "company\\\_name": "Accenture Singapore", "country": "SG" }
 ```
 
 **Returns:** Verification report with confidence level, confirmed identity fields, data sources checked, and verification gaps.
 
 \---
 
-### `check\_company\_risk`
+### `check\\\_company\\\_risk`
 
 AI-powered due diligence risk assessment. Analyses registry data to produce a risk score (0–100), risk level, specific risk factors, and recommended due diligence actions.
 
 **Example:**
 
 ```json
-{ "company\_name": "Acme Trading Ltd", "registration\_number": "12345678", "jurisdiction": "gb" }
+{ "company\\\_name": "Acme Trading Ltd", "registration\\\_number": "12345678", "jurisdiction": "gb" }
 ```
 
 **Returns:** Risk score, risk level (LOW / MEDIUM / HIGH / CRITICAL), list of specific risk factors with severity, positive indicators, and recommended next steps.
 
 \---
 
-### `get\_officers`
+### `get\\\_officers`
 
 Get the directors and officers of a UK company including appointment dates, roles, nationalities, and resignation history. Useful for beneficial ownership analysis.
 
 **Example:**
 
 ```json
-{ "company\_name": "Shell PLC", "registration\_number": "04366849", "jurisdiction": "gb" }
+{ "company\\\_name": "Shell PLC", "registration\\\_number": "04366849", "jurisdiction": "gb" }
 ```
 
 **Returns:** Active and resigned officers with roles, appointment dates, nationalities, and occupations.
@@ -111,17 +111,17 @@ smithery mcp add OjasKord/bizfile-mcp
 
 ### Connect via Claude Desktop
 
-Add to your `claude\_desktop\_config.json`:
+Add to your `claude\\\_desktop\\\_config.json`:
 
 ```json
 {
   "mcpServers": {
     "bizfile": {
       "command": "node",
-      "args": \["/path/to/bizfile-mcp/src/server.js"],
+      "args": \\\["/path/to/bizfile-mcp/src/server.js"],
       "env": {
-        "ANTHROPIC\_API\_KEY": "your-key-here",
-        "COMPANIES\_HOUSE\_API\_KEY": "your-key-here"
+        "ANTHROPIC\\\_API\\\_KEY": "your-key-here",
+        "COMPANIES\\\_HOUSE\\\_API\\\_KEY": "your-key-here"
       }
     }
   }
@@ -140,9 +140,9 @@ https://bizfile-mcp--ojaskord.run.tools
 
 |Variable|Required|Description|
 |-|-|-|
-|`ANTHROPIC\_API\_KEY`|✅ Required|Powers AI risk assessment and verification|
-|`COMPANIES\_HOUSE\_API\_KEY`|Recommended|Free from developer.company-information.service.gov.uk — unlocks full UK data|
-|`OPENCORPORATES\_API\_TOKEN`|Optional|Higher rate limits on global search|
+|`ANTHROPIC\\\_API\\\_KEY`|✅ Required|Powers AI risk assessment and verification|
+|`COMPANIES\\\_HOUSE\\\_API\\\_KEY`|Recommended|Free from developer.company-information.service.gov.uk — unlocks full UK data|
+|`OPENCORPORATES\\\_API\\\_TOKEN`|Optional|Higher rate limits on global search|
 
 \---
 
