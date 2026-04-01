@@ -1,321 +1,234 @@
-#!/usr/bin/env node
-/**
- * Bizfile MCP Server v1.1
- * Supports both STDIO and HTTP/SSE transport
- */
+const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import Anthropic from "@anthropic-ai/sdk";
-import http from "http";
-import { URL } from "url";
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = "claude-sonnet-4-20250514";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 
-// ─── DATA SOURCES ─────────────────────────────────────────────────────────────
+const apiKeys = new Map();
+apiKeys.set('biz_free_demo_key_123', { email: 'demo@kordagencies.com', plan: 'free', createdAt: new Date().toISOString(), calls: 0, limit: 100 });
 
-async function searchCompaniesHouse(companyName) {
-  const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
-  if (!apiKey) return null;
-  const url = `https://api.company-information.service.gov.uk/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=5`;
-  const auth = Buffer.from(`${apiKey}:`).toString("base64");
-  const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
-  if (!res.ok) return null;
-  return await res.json();
+const PLAN_LIMITS = { free: 100, pro: 10000, enterprise: Infinity };
+
+function generateApiKey() { return 'biz_' + crypto.randomBytes(24).toString('hex'); }
+
+function getPlanFromProduct(productName) {
+  if (!productName) return 'pro';
+  if (productName.toLowerCase().includes('enterprise')) return 'enterprise';
+  return 'pro';
 }
 
-async function getCompaniesHouseProfile(companyNumber) {
-  const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
-  if (!apiKey) return null;
-  const auth = Buffer.from(`${apiKey}:`).toString("base64");
-  const headers = { Authorization: `Basic ${auth}` };
-  const [profileRes, officersRes] = await Promise.all([
-    fetch(`https://api.company-information.service.gov.uk/company/${companyNumber}`, { headers }),
-    fetch(`https://api.company-information.service.gov.uk/company/${companyNumber}/officers`, { headers }),
-  ]);
-  const profile = profileRes.ok ? await profileRes.json() : null;
-  const officers = officersRes.ok ? await officersRes.json() : null;
-  return { profile, officers };
-}
-
-async function searchACRA(companyName) {
-  const url = `https://data.gov.sg/api/action/datastore_search?resource_id=d_3f960c10fed6145404ca7b821f263b87&q=${encodeURIComponent(companyName)}&limit=5`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.result?.records || null;
-}
-
-async function searchOpenCorporates(companyName, jurisdiction = null) {
-  const params = new URLSearchParams({ q: companyName, per_page: "5" });
-  if (jurisdiction) params.append("jurisdiction_code", jurisdiction);
-  const apiToken = process.env.OPENCORPORATES_API_TOKEN;
-  if (apiToken) params.append("api_token", apiToken);
-  const url = `https://api.opencorporates.com/v0.4/companies/search?${params}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.results?.companies || [];
-}
-
-async function getOpenCorporatesCompany(jurisdictionCode, companyNumber) {
-  const apiToken = process.env.OPENCORPORATES_API_TOKEN;
-  const tokenParam = apiToken ? `?api_token=${apiToken}` : "";
-  const url = `https://api.opencorporates.com/v0.4/companies/${jurisdictionCode}/${companyNumber}${tokenParam}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.results?.company || null;
-}
-
-// ─── AI ANALYSIS ─────────────────────────────────────────────────────────────
-
-async function analyzeWithClaude(systemPrompt, userContent) {
-  const response = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userContent }],
+async function sendEmail(to, subject, html) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ from: 'Bizfile MCP <ojas@kordagencies.com>', to: [to], subject, html });
+    const req = https.request({
+      hostname: 'api.resend.com', path: '/emails', method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })); });
+    req.on('error', e => resolve({ error: e.message }));
+    req.write(body); req.end();
   });
-  return response.content[0].text;
 }
 
-const RISK_PROMPT = `You are a corporate intelligence and KYC specialist. Analyse the company data and return ONLY a JSON risk assessment with this structure:
-{"risk_score":0-100,"risk_level":"LOW|MEDIUM|HIGH|CRITICAL","risk_factors":[{"factor":"string","detail":"string","severity":"LOW|MEDIUM|HIGH"}],"positive_indicators":["string"],"recommended_actions":["string"],"summary":"string"}`;
-
-const VERIFY_PROMPT = `You are a KYC verification specialist. Return ONLY JSON:
-{"verified":true/false,"confidence":"HIGH|MEDIUM|LOW","identity_confirmed":{"legal_name":"string","registration_number":"string","jurisdiction":"string","status":"ACTIVE|INACTIVE|DISSOLVED|UNKNOWN"},"data_sources_checked":["string"],"discrepancies":["string"],"verification_gaps":["string"],"summary":"string"}`;
-
-// ─── TOOL HANDLERS ────────────────────────────────────────────────────────────
-
-async function handleSearchCompany({ company_name, jurisdiction, country }) {
-  const results = { sources: {}, companies: [] };
-  const searches = [];
-
-  searches.push(searchCompaniesHouse(company_name).then(r => { if (r) results.sources.companies_house = r; }).catch(() => {}));
-  searches.push(searchACRA(company_name).then(r => { if (r) results.sources.acra_singapore = r; }).catch(() => {}));
-  searches.push(searchOpenCorporates(company_name, jurisdiction).then(r => { results.sources.opencorporates = r; }).catch(() => {}));
-
-  await Promise.all(searches);
-
-  if (results.sources.companies_house?.items) {
-    results.companies.push(...results.sources.companies_house.items.slice(0, 5).map(c => ({
-      source: "Companies House (UK)", name: c.title, registration_number: c.company_number,
-      status: c.company_status, type: c.company_type, jurisdiction: "United Kingdom",
-      incorporated: c.date_of_creation,
-      url: `https://find-and-update.company-information.service.gov.uk/company/${c.company_number}`,
-    })));
-  }
-
-  if (results.sources.acra_singapore) {
-    results.companies.push(...results.sources.acra_singapore.slice(0, 5).map(c => ({
-      source: "ACRA (Singapore)", name: c.entity_name, registration_number: c.uen,
-      status: c.uen_status, type: c.entity_type, jurisdiction: "Singapore",
-      incorporated: c.reg_date, url: "https://www.bizfile.gov.sg",
-    })));
-  }
-
-  if (results.sources.opencorporates?.length) {
-    results.companies.push(...results.sources.opencorporates.slice(0, 5).map(item => {
-      const c = item.company;
-      return {
-        source: "OpenCorporates (Global)", name: c.name, registration_number: c.company_number,
-        status: c.current_status || (c.inactive ? "Inactive" : "Active"),
-        type: c.company_type, jurisdiction: c.jurisdiction_code?.toUpperCase(),
-        incorporated: c.incorporation_date, url: c.opencorporates_url,
-      };
-    }));
-  }
-
-  return { query: company_name, total_results: results.companies.length, companies: results.companies, sources_checked: Object.keys(results.sources) };
+async function sendApiKeyEmail(email, apiKey, plan) {
+  const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
+  const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
+  const html = `<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP · ${planLabel} Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><p style="color:#8A95A8;margin-bottom:32px">Welcome to Bizfile MCP. Here is everything you need to get started.</p><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all;font-weight:500">${apiKey}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Add to your MCP config</div><div style="color:#86EFAC;font-size:12px;line-height:2">{<br>&nbsp;&nbsp;"bizfile": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"url": "https://bizfile-mcp-production.up.railway.app",<br>&nbsp;&nbsp;&nbsp;&nbsp;"headers": { "x-api-key": "${apiKey}" }<br>&nbsp;&nbsp;}<br>}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:32px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Your Plan</div><div style="color:#E8EDF5;font-size:13px;line-height:2">Plan: ${planLabel}<br>API calls: ${limit}/month<br>All 5 MCP tools included<br>AI risk assessment included</div></div><p style="color:#5A6478;font-size:12px">Questions? Email ojas@kordagencies.com</p><p style="color:#5A6478;font-size:12px;margin-top:8px">— Ojas, Kordagencies</p></div></body></html>`;
+  return sendEmail(email, `Your Bizfile MCP ${planLabel} API Key`, html);
 }
 
-async function handleGetCompanyProfile({ company_name, registration_number, jurisdiction }) {
-  if (!registration_number) {
-    return { note: "Full profile requires a registration number. Use search_company first.", search: await handleSearchCompany({ company_name, jurisdiction }) };
-  }
-
-  let profileData = {};
-  if ((jurisdiction === "gb" || jurisdiction === "uk") && registration_number) {
-    const ch = await getCompaniesHouseProfile(registration_number);
-    if (ch) profileData.companies_house = ch;
-  }
-  try {
-    if (jurisdiction && registration_number) {
-      const oc = await getOpenCorporatesCompany(jurisdiction, registration_number);
-      if (oc) profileData.opencorporates = oc;
-    }
-  } catch {}
-
-  const ch = profileData.companies_house?.profile;
-  const oc = profileData.opencorporates;
-  const officers = profileData.companies_house?.officers?.items || [];
-
-  return {
-    legal_name: ch?.company_name || oc?.name,
-    registration_number: ch?.company_number || oc?.company_number,
-    status: ch?.company_status || (oc?.inactive ? "inactive" : "active"),
-    type: ch?.type || oc?.company_type,
-    jurisdiction: ch ? "United Kingdom" : oc?.jurisdiction_code?.toUpperCase(),
-    incorporated: ch?.date_of_creation || oc?.incorporation_date,
-    dissolved: ch?.date_of_cessation || oc?.dissolution_date,
-    registered_address: ch?.registered_office_address || null,
-    sic_codes: ch?.sic_codes || [],
-    accounts: ch?.accounts || null,
-    officers: officers.slice(0, 10).map(o => ({
-      name: o.name, role: o.officer_role, appointed: o.appointed_on,
-      resigned: o.resigned_on || null, nationality: o.nationality || null,
-    })),
-    filing_history_url: ch ? `https://find-and-update.company-information.service.gov.uk/company/${ch.company_number}/filing-history` : null,
-    sources: Object.keys(profileData),
-  };
+async function callClaude(prompt) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] });
+    const req = https.request({
+      hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d).content?.[0]?.text || ''); } catch(e) { reject(e); } }); });
+    req.on('error', reject); req.write(body); req.end();
+  });
 }
 
-async function handleVerifyCompany({ company_name, registration_number, jurisdiction, country }) {
-  const searchData = await handleSearchCompany({ company_name, jurisdiction: jurisdiction || country, country });
-  const analysis = await analyzeWithClaude(VERIFY_PROMPT, JSON.stringify({ company_name, registration_number, search_results: searchData }));
-  let parsed;
-  try { parsed = JSON.parse(analysis); } catch { parsed = { raw_analysis: analysis }; }
-  return { ...parsed, raw_data: searchData };
+async function searchCompaniesHouse(query) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(`${COMPANIES_HOUSE_API_KEY}:`).toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: `/search/companies?q=${encodeURIComponent(query)}&items_per_page=5`, method: 'GET', headers: { 'Authorization': `Basic ${auth}` } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({})); req.end();
+  });
 }
 
-async function handleCheckCompanyRisk({ company_name, registration_number, jurisdiction }) {
-  let companyData = {};
-  try { companyData.search = await handleSearchCompany({ company_name, jurisdiction }); } catch {}
-  if (registration_number && jurisdiction) {
-    try { companyData.profile = await handleGetCompanyProfile({ company_name, registration_number, jurisdiction }); } catch {}
-  }
-  const analysis = await analyzeWithClaude(RISK_PROMPT, JSON.stringify({ company_name, registration_number, jurisdiction, data: companyData }));
-  let parsed;
-  try { parsed = JSON.parse(analysis); } catch { parsed = { raw_analysis: analysis }; }
-  return { company: company_name, registration_number: registration_number || null, jurisdiction: jurisdiction || "unknown", ...parsed, data_sources: companyData.search?.sources_checked || [] };
+async function getCompanyDetails(number) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(`${COMPANIES_HOUSE_API_KEY}:`).toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: `/company/${number}`, method: 'GET', headers: { 'Authorization': `Basic ${auth}` } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({})); req.end();
+  });
 }
 
-async function handleGetOfficers({ company_name, registration_number, jurisdiction }) {
-  if (!registration_number) return { note: "Registration number required for officer lookup. Use search_company to find it.", company: company_name };
-
-  let officers = [], source = null;
-
-  if ((jurisdiction === "gb" || jurisdiction === "uk") && registration_number) {
-    const ch = await getCompaniesHouseProfile(registration_number);
-    if (ch?.officers?.items) {
-      officers = ch.officers.items.map(o => ({
-        name: o.name, role: o.officer_role, appointed: o.appointed_on,
-        resigned: o.resigned_on || null, nationality: o.nationality || null,
-        occupation: o.occupation || null,
-      }));
-      source = "Companies House (UK)";
-    }
-  }
-
-  if (!officers.length) return { note: "No officer data found. UK Companies House requires jurisdiction: gb", company: company_name };
-
-  return {
-    company: company_name, registration_number, source,
-    total_officers: officers.length,
-    active_officers: officers.filter(o => !o.resigned),
-    resigned_officers: officers.filter(o => o.resigned),
-  };
+async function getOfficersData(number) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(`${COMPANIES_HOUSE_API_KEY}:`).toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: `/company/${number}/officers`, method: 'GET', headers: { 'Authorization': `Basic ${auth}` } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({})); req.end();
+  });
 }
 
-// ─── TOOL DEFINITIONS ─────────────────────────────────────────────────────────
-
-const TOOLS = [
-  { name: "search_company", description: "Search for a company by name across UK Companies House, Singapore ACRA, and OpenCorporates (130+ jurisdictions).", inputSchema: { type: "object", properties: { company_name: { type: "string" }, country: { type: "string" }, jurisdiction: { type: "string" } }, required: ["company_name"] } },
-  { name: "get_company_profile", description: "Get detailed company profile: status, address, SIC codes, filing history. Provide registration_number and jurisdiction for best results.", inputSchema: { type: "object", properties: { company_name: { type: "string" }, registration_number: { type: "string" }, jurisdiction: { type: "string" } }, required: ["company_name"] } },
-  { name: "verify_company", description: "KYC-style company verification with confidence rating and discrepancy flags.", inputSchema: { type: "object", properties: { company_name: { type: "string" }, registration_number: { type: "string" }, jurisdiction: { type: "string" }, country: { type: "string" } }, required: ["company_name"] } },
-  { name: "check_company_risk", description: "AI-powered due diligence risk score (0-100) with specific risk factors and recommended actions.", inputSchema: { type: "object", properties: { company_name: { type: "string" }, registration_number: { type: "string" }, jurisdiction: { type: "string" } }, required: ["company_name"] } },
-  { name: "get_officers", description: "Get directors and officers with appointment dates, roles, and nationalities. Requires registration_number.", inputSchema: { type: "object", properties: { company_name: { type: "string" }, registration_number: { type: "string" }, jurisdiction: { type: "string" } }, required: ["company_name"] } },
+const tools = [
+  { name: 'search_company', description: 'Search for companies by name across global registries.', inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['query'] } },
+  { name: 'get_company_profile', description: 'Get full company profile including status, address, SIC codes, filing history.', inputSchema: { type: 'object', properties: { company_number: { type: 'string' }, jurisdiction: { type: 'string' } }, required: ['company_number'] } },
+  { name: 'verify_company', description: 'KYC verification returning confidence rating HIGH/MEDIUM/LOW.', inputSchema: { type: 'object', properties: { company_name: { type: 'string' }, company_number: { type: 'string' }, jurisdiction: { type: 'string' } }, required: ['company_name'] } },
+  { name: 'check_company_risk', description: 'AI risk assessment returning score 0-100 with risk factors and recommendations.', inputSchema: { type: 'object', properties: { company_name: { type: 'string' }, company_number: { type: 'string' }, jurisdiction: { type: 'string' } }, required: ['company_name'] } },
+  { name: 'get_officers', description: 'Get directors and officers including appointment dates, roles, nationalities.', inputSchema: { type: 'object', properties: { company_number: { type: 'string' }, jurisdiction: { type: 'string' } }, required: ['company_number'] } }
 ];
 
-// ─── MCP SERVER FACTORY ───────────────────────────────────────────────────────
-
-function createMCPServer() {
-  const server = new Server({ name: "bizfile-mcp", version: "1.1.0" }, { capabilities: { tools: {} } });
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    try {
-      let result;
-      switch (name) {
-        case "search_company": result = await handleSearchCompany(args); break;
-        case "get_company_profile": result = await handleGetCompanyProfile(args); break;
-        case "verify_company": result = await handleVerifyCompany(args); break;
-        case "check_company_risk": result = await handleCheckCompanyRisk(args); break;
-        case "get_officers": result = await handleGetOfficers(args); break;
-        default: throw new Error(`Unknown tool: ${name}`);
-      }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    } catch (error) {
-      return { content: [{ type: "text", text: JSON.stringify({ error: error.message, tool: name }) }], isError: true };
-    }
-  });
-
-  return server;
+async function executeTool(name, args) {
+  if (name === 'search_company') {
+    const r = await searchCompaniesHouse(args.query);
+    const items = r.items || [];
+    if (!items.length) return { found: false, message: 'No companies found.' };
+    return { found: true, total_results: r.total_results || items.length, companies: items.slice(0,5).map(c => ({ name: c.title, number: c.company_number, status: c.company_status, type: c.company_type, address: c.address_snippet, incorporated: c.date_of_creation })) };
+  }
+  if (name === 'get_company_profile') {
+    const d = await getCompanyDetails(args.company_number);
+    if (d.error) return { error: 'Company not found', number: args.company_number };
+    return { name: d.company_name, number: d.company_number, status: d.company_status, type: d.type, incorporated: d.date_of_creation, address: d.registered_office_address, sic_codes: d.sic_codes, accounts: d.accounts, jurisdiction: d.jurisdiction };
+  }
+  if (name === 'get_officers') {
+    const d = await getOfficersData(args.company_number);
+    const items = d.items || [];
+    return { total_officers: d.total_results || items.length, officers: items.map(o => ({ name: o.name, role: o.officer_role, appointed: o.appointed_on, resigned: o.resigned_on || null, nationality: o.nationality })) };
+  }
+  if (name === 'verify_company') {
+    const r = await searchCompaniesHouse(args.company_name);
+    const items = r.items || [];
+    const company = args.company_number ? items.find(c => c.company_number === args.company_number) || items[0] : items.find(c => c.title.toLowerCase() === args.company_name.toLowerCase()) || items[0];
+    if (!company) return { verified: false, confidence: 'LOW', reason: 'Company not found in registry' };
+    const nameMatch = company.title.toLowerCase() === args.company_name.toLowerCase();
+    const numberMatch = !args.company_number || company.company_number === args.company_number;
+    const isActive = company.company_status === 'active';
+    let confidence = 'LOW';
+    if (nameMatch && numberMatch && isActive) confidence = 'HIGH';
+    else if ((nameMatch || numberMatch) && isActive) confidence = 'MEDIUM';
+    return { verified: confidence !== 'LOW', confidence, matched_name: company.title, matched_number: company.company_number, status: company.company_status, name_match: nameMatch, number_match: numberMatch, active: isActive, incorporated: company.date_of_creation };
+  }
+  if (name === 'check_company_risk') {
+    const r = await searchCompaniesHouse(args.company_name);
+    const items = r.items || [];
+    const company = args.company_number ? items.find(c => c.company_number === args.company_number) || items[0] : items[0];
+    let companyData = {};
+    if (company) companyData = await getCompanyDetails(company.company_number);
+    const prompt = `You are a trade finance and KYC risk analyst. Assess the risk of this company for international trade.\n\nCompany: ${args.company_name}\nRegistry data: ${JSON.stringify({...company,...companyData})}\n\nReturn ONLY valid JSON:\n{"risk_score":<0-100>,"risk_level":"<LOW|MEDIUM|HIGH|CRITICAL>","risk_factors":[...],"positive_indicators":[...],"recommended_actions":[...],"summary":"<2 sentences>"}`;
+    const response = await callClaude(prompt);
+    try { return JSON.parse(response.replace(/```json|```/g,'').trim()); }
+    catch(e) { return { risk_score: 50, risk_level: 'MEDIUM', summary: response }; }
+  }
+  return { error: 'Unknown tool: ' + name };
 }
 
-// ─── HTTP/SSE SERVER ──────────────────────────────────────────────────────────
+function validateApiKey(req) {
+  const key = req.headers['x-api-key'];
+  if (!key) return { valid: false, reason: 'Missing x-api-key header. Get your key at kordagencies.com' };
+  const record = apiKeys.get(key);
+  if (!record) return { valid: false, reason: 'Invalid API key. Get your key at kordagencies.com' };
+  if (record.limit !== Infinity && record.calls >= record.limit) return { valid: false, reason: `Monthly limit of ${record.limit} calls reached. Upgrade at kordagencies.com` };
+  return { valid: true, record, key };
+}
 
-const transports = new Map();
+async function handleStripeWebhook(body) {
+  try {
+    const event = JSON.parse(body);
+    console.log('Stripe event received:', event.type);
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const email = session.customer_email || session.customer_details?.email;
+      const productName = session.metadata?.product_name || '';
+      const plan = getPlanFromProduct(productName);
+      if (email) {
+        const apiKey = generateApiKey();
+        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan] });
+        const emailResult = await sendApiKeyEmail(email, apiKey, plan);
+        console.log(`API key created for ${email} (${plan}): ${apiKey}`);
+        console.log('Email result:', JSON.stringify(emailResult));
+        return { success: true, email, plan };
+      }
+    }
+    return { received: true, type: event.type };
+  } catch(e) {
+    console.error('Webhook error:', e.message);
+    return { error: e.message };
+  }
+}
 
-const httpServer = http.createServer(async (req, res) => {
-  const reqUrl = new URL(req.url, `http://localhost:${PORT}`);
+const server = http.createServer(async (req, res) => {
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id' };
+  if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
-
-  if (reqUrl.pathname === "/" || reqUrl.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ name: "bizfile-mcp", version: "1.1.0", status: "running", tools: TOOLS.map(t => t.name) }));
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', version: '2.0.0', keys_issued: apiKeys.size }));
     return;
   }
 
-  if (reqUrl.pathname === "/sse") {
-    const server = createMCPServer();
-    const transport = new SSEServerTransport("/messages", res);
-    transports.set(transport.sessionId, transport);
-    res.on("close", () => transports.delete(transport.sessionId));
-    await server.connect(transport);
-    return;
-  }
-
-  if (reqUrl.pathname === "/messages") {
-    const sessionId = reqUrl.searchParams.get("sessionId");
-    const transport = transports.get(sessionId);
-    if (!transport) { res.writeHead(404); res.end(JSON.stringify({ error: "Session not found" })); return; }
-    let body = "";
-    req.on("data", chunk => { body += chunk; });
-    req.on("end", async () => {
-      try { await transport.handlePostMessage(req, res, JSON.parse(body)); }
-      catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+  if (req.url === '/webhook/stripe' && req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => {
+      const result = await handleStripeWebhook(body);
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
     });
     return;
   }
 
-  res.writeHead(404); res.end(JSON.stringify({ error: "Not found" }));
+  if (req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const request = JSON.parse(body);
+        if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
+          const auth = validateApiKey(req);
+          if (!auth.valid) {
+            res.writeHead(401, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32001, message: auth.reason } }));
+            return;
+          }
+          auth.record.calls++;
+        }
+        let response;
+        if (request.method === 'initialize') {
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '2.0.0' } } };
+        } else if (request.method === 'notifications/initialized') {
+          res.writeHead(204, cors); res.end(); return;
+        } else if (request.method === 'tools/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { tools } };
+        } else if (request.method === 'tools/call') {
+          const { name, arguments: args } = request.params;
+          const result = await executeTool(name, args || {});
+          response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+        } else {
+          response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
+        }
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(response));
+      } catch(e) {
+        res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '2.0.0', status: 'ok', docs: 'https://kordagencies.com' }));
+    return;
+  }
+
+  res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-// ─── START ────────────────────────────────────────────────────────────────────
-
-if (process.env.MCP_TRANSPORT === "stdio") {
-  const server = createMCPServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Bizfile MCP Server v1.1 running (STDIO)");
-} else {
-  httpServer.listen(PORT, () => {
-    console.log(`Bizfile MCP Server v1.1 running on port ${PORT}`);
-  });
-}
+server.listen(PORT, () => {
+  console.log(`Bizfile MCP v2.0.0 running on port ${PORT}`);
+  console.log(`Resend: ${RESEND_API_KEY ? 'configured' : 'MISSING'}`);
+  console.log(`Anthropic: ${ANTHROPIC_API_KEY ? 'configured' : 'MISSING'}`);
+});
