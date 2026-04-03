@@ -1,4 +1,3 @@
-
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
@@ -6,6 +5,7 @@ const crypto = require('crypto');
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 
@@ -15,6 +15,8 @@ const FREE_TIER_LIMIT = 20;
 
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
+const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
+const SANCTIONS_PRICE = { pro: 0.15, enterprise: 0.125 };
 
 function generateApiKey() { return 'biz_' + crypto.randomBytes(24).toString('hex'); }
 
@@ -39,7 +41,9 @@ async function sendEmail(to, subject, html) {
 async function sendApiKeyEmail(email, apiKey, plan) {
   const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
   const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
-  const html = `<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP · ${planLabel} Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><p style="color:#8A95A8;margin-bottom:32px">Welcome to Bizfile MCP. Here is everything you need to get started.</p><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all;font-weight:500">${apiKey}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Add to your MCP config</div><div style="color:#86EFAC;font-size:12px;line-height:2">{<br>&nbsp;&nbsp;"bizfile": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"url": "https://bizfile-mcp-production.up.railway.app",<br>&nbsp;&nbsp;&nbsp;&nbsp;"headers": { "x-api-key": "${apiKey}" }<br>&nbsp;&nbsp;}<br>}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:32px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Your Plan</div><div style="color:#E8EDF5;font-size:13px;line-height:2">Plan: ${planLabel}<br>API calls: ${limit}/month<br>All 5 MCP tools included<br>AI risk assessment included</div></div><p style="color:#5A6478;font-size:12px">Questions? Email ojas@kordagencies.com</p><p style="color:#5A6478;font-size:12px;margin-top:8px">— Ojas, Kordagencies</p></div></body></html>`;
+  const sanctionsLimit = plan === 'enterprise' ? '2,000' : '500';
+  const sanctionsPrice = plan === 'enterprise' ? '£0.125' : '£0.15';
+  const html = `<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP · ${planLabel} Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><p style="color:#8A95A8;margin-bottom:32px">Welcome to Bizfile MCP. Here is everything you need to get started.</p><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all;font-weight:500">${apiKey}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Add to your MCP config</div><div style="color:#86EFAC;font-size:12px;line-height:2">{<br>&nbsp;&nbsp;"bizfile": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"url": "https://bizfile-mcp-production.up.railway.app",<br>&nbsp;&nbsp;&nbsp;&nbsp;"headers": { "x-api-key": "${apiKey}" }<br>&nbsp;&nbsp;}<br>}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Your Plan</div><div style="color:#E8EDF5;font-size:13px;line-height:2">Plan: ${planLabel}<br>Company intelligence calls: ${limit}/month<br>Sanctions screening: ${sanctionsPrice}/check (max ${sanctionsLimit}/month)<br>All 6 MCP tools included<br><br><span style="color:#BA7517">Note: Sanctions screening (screen_entity tool) is billed separately at ${sanctionsPrice} per check. You will only be charged for checks you actually use. Maximum ${sanctionsLimit} checks/month on this plan.</span></div></div><p style="color:#5A6478;font-size:12px">Questions? Email ojas@kordagencies.com</p><p style="color:#5A6478;font-size:12px;margin-top:8px">— Ojas, Kordagencies</p></div></body></html>`;
   return sendEmail(email, `Your Bizfile MCP ${planLabel} API Key`, html);
 }
 
@@ -78,12 +82,66 @@ async function getOfficersData(number) {
   });
 }
 
+async function screenEntityOpenSanctions(name, schema, country) {
+  return new Promise((resolve) => {
+    const query = { schema: schema || 'Thing', properties: { name: [name] } };
+    if (country) query.properties.country = [country];
+    const body = JSON.stringify({ queries: { q1: query } });
+    const req = https.request({
+      hostname: 'api.opensanctions.org',
+      path: '/match/default',
+      method: 'POST',
+      headers: {
+        'Authorization': `ApiKey ${OPENSANCTIONS_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } }); });
+    req.on('error', () => resolve(null));
+    req.write(body); req.end();
+  });
+}
+
 const tools = [
-  { name: 'search_company', description: 'Search for companies by name across global registries including UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] } },
-  { name: 'get_company_profile', description: 'Get full company profile including registration status, address, SIC codes, accounts and filing history. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } },
-  { name: 'verify_company', description: 'KYC-style verification returning confidence rating HIGH/MEDIUM/LOW and identity confirmation. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
-  { name: 'check_company_risk', description: 'AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors and recommended due diligence actions. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
-  { name: 'get_officers', description: 'Get full list of directors and officers including appointment dates, roles, nationalities and resignation history. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } }
+  {
+    name: 'search_company',
+    description: 'Search for companies by name across global registries including UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates. No API key required for first 20 calls.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] }
+  },
+  {
+    name: 'get_company_profile',
+    description: 'Get full company profile including registration status, address, SIC codes, accounts and filing history. No API key required for first 20 calls.',
+    inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
+  },
+  {
+    name: 'verify_company',
+    description: 'KYC-style verification returning confidence rating HIGH/MEDIUM/LOW and identity confirmation. No API key required for first 20 calls.',
+    inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
+  },
+  {
+    name: 'check_company_risk',
+    description: 'AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors and recommended due diligence actions. No API key required for first 20 calls.',
+    inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
+  },
+  {
+    name: 'get_officers',
+    description: 'Get full list of directors and officers including appointment dates, roles, nationalities and resignation history. No API key required for first 20 calls.',
+    inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
+  },
+  {
+    name: 'screen_entity',
+    description: 'Screen a person, company, or vessel against 328 global sanctions lists including OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 320+ more. Supports fuzzy name matching and handles Arabic, Chinese, Cyrillic, and other scripts. Returns match status, risk level, sanction programs hit, and recommended action. IMPORTANT: This tool is billed at £0.15/check for Pro plan and £0.125/check for Enterprise plan. Only available to paid API key holders. Use this tool to screen counterparties, beneficial owners, vessels, and intermediary banks before entering any trade finance transaction.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Full name of the person, company, or vessel to screen' },
+        entity_type: { type: 'string', description: 'Type of entity: Person, Company, or Vessel. Defaults to Thing (screens all types).' },
+        country: { type: 'string', description: 'Optional ISO country code to narrow search (e.g. ru, cn, ir, kp)' },
+        context: { type: 'string', description: 'Optional context about this entity (e.g. "coal trader Indonesia", "vessel IMO 1234567") to improve result interpretation' }
+      },
+      required: ['name']
+    }
+  }
 ];
 
 async function executeTool(name, args) {
@@ -127,6 +185,64 @@ async function executeTool(name, args) {
     try { return JSON.parse(response.replace(/```json|```/g,'').trim()); }
     catch(e) { return { risk_score: 50, risk_level: 'MEDIUM', summary: response }; }
   }
+  if (name === 'screen_entity') {
+    const schema = args.entity_type || 'Thing';
+    const raw = await screenEntityOpenSanctions(args.name, schema, args.country);
+    if (!raw) return { error: 'Sanctions screening service unavailable. Please try again.' };
+
+    const results = raw.responses?.q1?.results || [];
+    const matches = results.filter(r => r.match === true && r.score >= 0.7);
+    const topMatch = matches[0];
+
+    if (!topMatch) {
+      return {
+        screened: true,
+        entity: args.name,
+        sanctioned: false,
+        match_found: false,
+        risk_level: 'CLEAR',
+        recommended_action: 'PROCEED',
+        summary: `No sanctions matches found for "${args.name}" across 328 global sanctions lists.`,
+        lists_checked: 328,
+        score: 0
+      };
+    }
+
+    const topics = topMatch.properties?.topics || [];
+    const isSanctioned = topics.includes('sanction') || topics.includes('debarment');
+    const programs = topMatch.properties?.programId || [];
+    const datasets = topMatch.datasets || [];
+
+    let riskLevel = 'LOW';
+    let action = 'ENHANCED_DUE_DILIGENCE';
+    if (isSanctioned) { riskLevel = 'CRITICAL'; action = 'BLOCK'; }
+    else if (topics.includes('wanted') || topics.includes('export.control')) { riskLevel = 'HIGH'; action = 'ENHANCED_DUE_DILIGENCE'; }
+    else if (topics.includes('role.pep')) { riskLevel = 'MEDIUM'; action = 'ENHANCED_DUE_DILIGENCE'; }
+
+    return {
+      screened: true,
+      entity: args.name,
+      sanctioned: isSanctioned,
+      match_found: true,
+      matched_name: topMatch.caption,
+      match_score: Math.round(topMatch.score * 100) / 100,
+      risk_level: riskLevel,
+      recommended_action: action,
+      sanction_programs: programs.slice(0, 10),
+      topics: topics,
+      lists_hit: datasets.slice(0, 10),
+      lists_checked: 328,
+      birth_date: topMatch.properties?.birthDate?.[0] || null,
+      nationality: topMatch.properties?.nationality?.[0] || null,
+      summary: isSanctioned
+        ? `SANCTIONED: "${topMatch.caption}" appears on ${programs.length} sanctions programs including ${datasets.slice(0,3).join(', ')}. Recommend blocking this transaction immediately.`
+        : `MATCH FOUND: "${topMatch.caption}" is flagged as ${topics.join(', ')} but not directly sanctioned. Enhanced due diligence required before proceeding.`,
+      trade_finance_note: isSanctioned
+        ? 'Do not issue Letter of Credit, Bill of Lading, or process any payment to this counterparty. Notify your compliance officer immediately.'
+        : 'Conduct enhanced due diligence. Obtain additional documentation. Consider escalating to compliance officer before proceeding.',
+      other_matches: matches.slice(1, 3).map(m => ({ name: m.caption, score: Math.round(m.score * 100) / 100, sanctioned: m.properties?.topics?.includes('sanction') || false }))
+    };
+  }
   return { error: 'Unknown tool: ' + name };
 }
 
@@ -139,7 +255,7 @@ function checkAccess(req) {
       return { allowed: false, reason: `Monthly limit of ${record.limit} calls reached. Upgrade at kordagencies.com`, tier: 'limit_reached' };
     }
     record.calls++;
-    return { allowed: true, tier: record.plan };
+    return { allowed: true, tier: record.plan, record, key: apiKey };
   }
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const calls = freeTierUsage.get(ip) || 0;
@@ -149,6 +265,29 @@ function checkAccess(req) {
   freeTierUsage.set(ip, calls + 1);
   const remaining = FREE_TIER_LIMIT - calls - 1;
   return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? `${remaining} free calls remaining. Upgrade at kordagencies.com` : null };
+}
+
+function checkSanctionsAccess(req) {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Note: billed at £0.15/check for Pro, £0.125/check for Enterprise.' };
+  const record = apiKeys.get(apiKey);
+  if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
+  const plan = record.plan;
+  const limit = SANCTIONS_LIMITS[plan] || 500;
+  const used = record.sanctionsChecks || 0;
+  if (used >= limit) {
+    return { allowed: false, reason: `Sanctions screening limit of ${limit} checks/month reached for your ${plan} plan. Contact ojas@kordagencies.com to discuss higher limits.`, checks_used: used, checks_limit: limit };
+  }
+  record.sanctionsChecks = used + 1;
+  const price = SANCTIONS_PRICE[plan] || 0.15;
+  return {
+    allowed: true,
+    checks_used: used + 1,
+    checks_remaining: limit - used - 1,
+    checks_limit: limit,
+    cost_this_call: `£${price.toFixed(3)}`,
+    plan
+  };
 }
 
 async function handleStripeWebhook(body) {
@@ -162,7 +301,7 @@ async function handleStripeWebhook(body) {
       const plan = getPlanFromProduct(productName);
       if (email) {
         const apiKey = generateApiKey();
-        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan] });
+        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan], sanctionsChecks: 0 });
         const emailResult = await sendApiKeyEmail(email, apiKey, plan);
         console.log(`API key created for ${email} (${plan}): ${apiKey}`);
         console.log('Email result:', JSON.stringify(emailResult));
@@ -182,24 +321,22 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '3.0.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size }));
+    res.end(JSON.stringify({ status: 'ok', version: '4.0.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
   if (req.url === '/stats' && req.method === 'GET') {
-    if (req.headers['x-stats-key'] !== STATS_KEY) {
-      res.writeHead(401, cors);
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
+    if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
     const toolCounts = {};
     usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
+    const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       free_tier_unique_ips: freeTierUsage.size,
       free_tier_total_calls: totalFreeCalls,
       paid_keys_issued: apiKeys.size,
+      total_sanctions_checks: totalSanctionsChecks,
       tool_usage: toolCounts,
       recent_calls: usageLog.slice(-20).reverse()
     }));
@@ -221,19 +358,34 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const request = JSON.parse(body);
+        let sanctionsMeta = null;
+
         if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
-          const access = checkAccess(req);
-          if (!access.allowed) {
-            res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason } }));
-            return;
+          const toolName = request.method === 'tools/call' ? request.params?.name : null;
+
+          if (toolName === 'screen_entity') {
+            const sanctionsAccess = checkSanctionsAccess(req);
+            if (!sanctionsAccess.allowed) {
+              res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, data: sanctionsAccess } }));
+              return;
+            }
+            sanctionsMeta = sanctionsAccess;
+          } else {
+            const access = checkAccess(req);
+            if (!access.allowed) {
+              res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason } }));
+              return;
+            }
+            req._accessWarning = access.warning;
+            req._tier = access.tier;
           }
-          req._accessWarning = access.warning;
-          req._tier = access.tier;
         }
+
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '3.0.0', description: 'Company intelligence for AI agents. Free tier: 20 calls/month, no API key required. Upgrade at kordagencies.com' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.0.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -241,10 +393,19 @@ const server = http.createServer(async (req, res) => {
         } else if (request.method === 'tools/call') {
           const { name, arguments: args } = request.params;
           const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-          usageLog.push({ tool: name, tier: req._tier || 'free', time: new Date().toISOString(), ip: ip.slice(0,8) + '...' });
+          usageLog.push({ tool: name, tier: req._tier || (sanctionsMeta ? sanctionsMeta.plan : 'paid'), time: new Date().toISOString(), ip: ip.slice(0,8) + '...' });
           if (usageLog.length > 1000) usageLog.shift();
+
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
+          if (sanctionsMeta) {
+            result._billing = {
+              checks_used: sanctionsMeta.checks_used,
+              checks_remaining: sanctionsMeta.checks_remaining,
+              checks_limit: sanctionsMeta.checks_limit,
+              cost_this_call: sanctionsMeta.cost_this_call
+            };
+          }
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
         } else {
           response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
@@ -261,7 +422,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '3.0.0', status: 'ok', free_tier: '20 calls/month, no API key required', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.0.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -269,8 +430,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Bizfile MCP v3.0.0 running on port ${PORT}`);
+  console.log(`Bizfile MCP v4.0.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
+  console.log(`Sanctions screening: ${OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'}`);
   console.log(`Resend: ${RESEND_API_KEY ? 'configured' : 'MISSING'}`);
   console.log(`Anthropic: ${ANTHROPIC_API_KEY ? 'configured' : 'MISSING'}`);
 });
