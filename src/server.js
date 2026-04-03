@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 
 // Track free tier usage by IP
 const freeTierUsage = new Map(); // IP -> call count
-const FREE_TIER_LIMIT = 100;
+const FREE_TIER_LIMIT = 20;
 
 // Paid API keys
 const apiKeys = new Map();
