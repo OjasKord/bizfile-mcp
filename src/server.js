@@ -1,3 +1,4 @@
+
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
@@ -6,12 +7,12 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const PORT = process.env.PORT || 3000;
+const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 
-// Track free tier usage by IP
-const freeTierUsage = new Map(); // IP -> call count
+const freeTierUsage = new Map();
+const usageLog = [];
 const FREE_TIER_LIMIT = 20;
 
-// Paid API keys
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
 
@@ -78,11 +79,11 @@ async function getOfficersData(number) {
 }
 
 const tools = [
-  { name: 'search_company', description: 'Search for companies by name across global registries including UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates. no API key required for first 20 calls.', inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] } },
-  { name: 'get_company_profile', description: 'Get full company profile including registration status, address, SIC codes, accounts and filing history. no API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } },
-  { name: 'verify_company', description: 'KYC-style verification returning confidence rating HIGH/MEDIUM/LOW and identity confirmation. no API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
-  { name: 'check_company_risk', description: 'AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors and recommended due diligence actions. no API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
-  { name: 'get_officers', description: 'Get full list of directors and officers including appointment dates, roles, nationalities and resignation history. no API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } }
+  { name: 'search_company', description: 'Search for companies by name across global registries including UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] } },
+  { name: 'get_company_profile', description: 'Get full company profile including registration status, address, SIC codes, accounts and filing history. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } },
+  { name: 'verify_company', description: 'KYC-style verification returning confidence rating HIGH/MEDIUM/LOW and identity confirmation. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
+  { name: 'check_company_risk', description: 'AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors and recommended due diligence actions. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] } },
+  { name: 'get_officers', description: 'Get full list of directors and officers including appointment dates, roles, nationalities and resignation history. No API key required for first 20 calls.', inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] } }
 ];
 
 async function executeTool(name, args) {
@@ -131,8 +132,6 @@ async function executeTool(name, args) {
 
 function checkAccess(req) {
   const apiKey = req.headers['x-api-key'];
-  
-  // Paid API key
   if (apiKey) {
     const record = apiKeys.get(apiKey);
     if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com', tier: 'invalid' };
@@ -142,20 +141,14 @@ function checkAccess(req) {
     record.calls++;
     return { allowed: true, tier: record.plan };
   }
-
-  // Free tier by IP
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const calls = freeTierUsage.get(ip) || 0;
   if (calls >= FREE_TIER_LIMIT) {
-    return { 
-      allowed: false, 
-      reason: `Free tier limit of ${FREE_TIER_LIMIT} calls reached. Upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.`,
-      tier: 'free_limit_reached'
-    };
+    return { allowed: false, reason: `Free tier limit of ${FREE_TIER_LIMIT} calls reached. Upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.`, tier: 'free_limit_reached' };
   }
   freeTierUsage.set(ip, calls + 1);
   const remaining = FREE_TIER_LIMIT - calls - 1;
-  return { allowed: true, tier: 'free', remaining, warning: remaining < 20 ? `${remaining} free calls remaining. Upgrade at kordagencies.com` : null };
+  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? `${remaining} free calls remaining. Upgrade at kordagencies.com` : null };
 }
 
 async function handleStripeWebhook(body) {
@@ -184,12 +177,32 @@ async function handleStripeWebhook(body) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id' };
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', version: '3.0.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size }));
+    return;
+  }
+
+  if (req.url === '/stats' && req.method === 'GET') {
+    if (req.headers['x-stats-key'] !== STATS_KEY) {
+      res.writeHead(401, cors);
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+    const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
+    const toolCounts = {};
+    usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      free_tier_unique_ips: freeTierUsage.size,
+      free_tier_total_calls: totalFreeCalls,
+      paid_keys_issued: apiKeys.size,
+      tool_usage: toolCounts,
+      recent_calls: usageLog.slice(-20).reverse()
+    }));
     return;
   }
 
@@ -208,8 +221,6 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const request = JSON.parse(body);
-
-        // Skip access check for initialize
         if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
           const access = checkAccess(req);
           if (!access.allowed) {
@@ -217,22 +228,22 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason } }));
             return;
           }
-          // Attach warning to response if approaching limit
           req._accessWarning = access.warning;
           req._tier = access.tier;
         }
-
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '3.0.0', description: 'Company intelligence for AI agents. Free tier: 100 calls/month, no API key required. Upgrade at kordagencies.com' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '3.0.0', description: 'Company intelligence for AI agents. Free tier: 20 calls/month, no API key required. Upgrade at kordagencies.com' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
           response = { jsonrpc: '2.0', id: request.id, result: { tools } };
         } else if (request.method === 'tools/call') {
           const { name, arguments: args } = request.params;
+          const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+          usageLog.push({ tool: name, tier: req._tier || 'free', time: new Date().toISOString(), ip: ip.slice(0,8) + '...' });
+          if (usageLog.length > 1000) usageLog.shift();
           const result = await executeTool(name, args || {});
-          // Add upgrade prompt if approaching limit
           if (req._accessWarning) result._notice = req._accessWarning;
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
         } else {
@@ -250,32 +261,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '3.0.0', status: 'ok', free_tier: '100 calls/month, no API key required', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '3.0.0', status: 'ok', free_tier: '20 calls/month, no API key required', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
   res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
-if (req.url === '/stats' && req.method === 'GET') {
-    const statsKey = req.headers['x-stats-key'];
-    if (statsKey !== 'ojas2026') {
-      res.writeHead(401, corsHeaders);
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
-    const stats = {
-      free_tier_users: freeTierUsage.size,
-      free_tier_total_calls: Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0),
-      paid_keys_issued: apiKeys.size,
-      top_ips: Array.from(freeTierUsage.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([ip, calls]) => ({ ip: ip.slice(0, 8) + '...', calls }))
-    };
-    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(stats));
-    return;
-  }
+
 server.listen(PORT, () => {
   console.log(`Bizfile MCP v3.0.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
