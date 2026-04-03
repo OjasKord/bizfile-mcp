@@ -1,182 +1,118 @@
-# <!-- mcp-name: io.github.OjasKord/bizfile-mcp -->
+<!-- mcp-name: io.github.OjasKord/bizfile-mcp -->
 
-# 
+# Bizfile MCP — Company Intelligence for AI Agents
 
-# Bizfile MCP — Global Company Intelligence
+Real-time company verification, KYC, and due diligence across 130+ jurisdictions. Connects directly to official government registries — no scraped data, no hallucinations.
 
-> Real-time company verification, KYC, and due diligence across 130+ jurisdictions for AI agents.
-
-[!\[smithery badge](https://smithery.ai/badge/OjasKord/bizfile-mcp)](https://smithery.ai/server/OjasKord/bizfile-mcp)
-
-## What it does
-
-Bizfile MCP gives any AI agent instant access to verified company data from official government registries worldwide. No hallucinated data — every result comes directly from authoritative sources in real time.
-
-Built for compliance, KYC, and due diligence workflows running inside AI agents.
-
-\---
-
-## Tools
-
-### `search\\\_company`
-
-Search for any company by name across UK Companies House, Singapore ACRA, and OpenCorporates (130+ jurisdictions).
-
-**Example:**
-
-```json
-{ "company\\\_name": "Shell", "country": "UK" }
-```
-
-**Returns:** List of matching companies with registration numbers, status, jurisdiction, incorporation date, and registry URLs.
-
-\---
-
-### `get\\\_company\\\_profile`
-
-Get a full company profile including registration status, registered address, SIC codes, filing history, accounts status, and key officers.
-
-**Example:**
-
-```json
-{ "company\\\_name": "Shell PLC", "registration\\\_number": "04366849", "jurisdiction": "gb" }
-```
-
-**Returns:** Complete company record with filing history URL, SIC codes, accounts, and officer list.
-
-\---
-
-### `verify\\\_company`
-
-KYC-style verification of a company across multiple registries. Returns a confidence rating (HIGH / MEDIUM / LOW), verified status, and any discrepancies found.
-
-**Example:**
-
-```json
-{ "company\\\_name": "Accenture Singapore", "country": "SG" }
-```
-
-**Returns:** Verification report with confidence level, confirmed identity fields, data sources checked, and verification gaps.
-
-\---
-
-### `check\\\_company\\\_risk`
-
-AI-powered due diligence risk assessment. Analyses registry data to produce a risk score (0–100), risk level, specific risk factors, and recommended due diligence actions.
-
-**Example:**
-
-```json
-{ "company\\\_name": "Acme Trading Ltd", "registration\\\_number": "12345678", "jurisdiction": "gb" }
-```
-
-**Returns:** Risk score, risk level (LOW / MEDIUM / HIGH / CRITICAL), list of specific risk factors with severity, positive indicators, and recommended next steps.
-
-\---
-
-### `get\\\_officers`
-
-Get the directors and officers of a UK company including appointment dates, roles, nationalities, and resignation history. Useful for beneficial ownership analysis.
-
-**Example:**
-
-```json
-{ "company\\\_name": "Shell PLC", "registration\\\_number": "04366849", "jurisdiction": "gb" }
-```
-
-**Returns:** Active and resigned officers with roles, appointment dates, nationalities, and occupations.
-
-\---
-
-## Data Sources
-
-|Source|Coverage|Free|
-|-|-|-|
-|UK Companies House|5M+ UK companies, full filing history|✅|
-|Singapore ACRA|All Singapore-registered entities|✅|
-|OpenCorporates|210M+ companies, 130+ jurisdictions|✅|
-|US SEC EDGAR|All US public company filings|✅|
-
-All data sourced from official government registries under open data licences. AI analysis powered by Anthropic Claude.
-
-\---
+**Free tier: 100 calls/month. No API key required. Just connect and go.**
 
 ## Quick Start
 
-### Connect via Smithery
+Add to your MCP config (Claude Desktop, Cursor, Windsurf, etc.):
+
+```json
+{
+  "bizfile": {
+    "url": "https://bizfile-mcp-production.up.railway.app"
+  }
+}
+```
+
+Or via Smithery:
 
 ```bash
 smithery mcp add OjasKord/bizfile-mcp
 ```
 
-### Connect via Claude Desktop
+That's it. No API key needed for the first 100 calls.
 
-Add to your `claude\\\_desktop\\\_config.json`:
+## Tools
+
+### `search_company`
+Search for any company by name across UK Companies House, Singapore ACRA, and 130+ jurisdictions.
 
 ```json
+{ "query": "Shell", "jurisdiction": "gb" }
+```
+
+### `get_company_profile`
+Full company profile — registration status, address, SIC codes, accounts, filing history.
+
+```json
+{ "company_number": "00445790", "jurisdiction": "gb" }
+```
+
+### `verify_company`
+KYC-style verification returning confidence rating (HIGH / MEDIUM / LOW).
+
+```json
+{ "company_name": "Shell UK Limited", "company_number": "00445790" }
+```
+
+### `check_company_risk`
+AI-powered risk assessment — score 0–100, risk level, specific risk factors, recommended due diligence actions.
+
+```json
+{ "company_name": "Acme Trading Ltd", "jurisdiction": "gb" }
+```
+
+### `get_officers`
+Full directors and officers list — appointment dates, roles, nationalities, resignation history.
+
+```json
+{ "company_number": "00445790" }
+```
+
+## Example Usage
+
+```
+User: Check the risk of Acme Trading Ltd before we sign a contract.
+
+Agent calls: check_company_risk({ company_name: "Acme Trading Ltd" })
+
+Response:
 {
-  "mcpServers": {
-    "bizfile": {
-      "command": "node",
-      "args": \\\["/path/to/bizfile-mcp/src/server.js"],
-      "env": {
-        "ANTHROPIC\\\_API\\\_KEY": "your-key-here",
-        "COMPANIES\\\_HOUSE\\\_API\\\_KEY": "your-key-here"
-      }
-    }
-  }
+  "risk_score": 23,
+  "risk_level": "LOW",
+  "risk_factors": ["Relatively new company (incorporated 2019)"],
+  "positive_indicators": ["Active status", "Consistent filing history", "3 directors"],
+  "recommended_actions": ["Request last 2 years accounts", "Verify director identities"],
+  "summary": "Acme Trading Ltd is a low-risk counterparty with consistent compliance history..."
 }
 ```
 
-### Connect via HTTP
+## Data Sources
 
-```
-https://bizfile-mcp--ojaskord.run.tools
-```
-
-\---
-
-## Environment Variables
-
-|Variable|Required|Description|
-|-|-|-|
-|`ANTHROPIC\\\_API\\\_KEY`|✅ Required|Powers AI risk assessment and verification|
-|`COMPANIES\\\_HOUSE\\\_API\\\_KEY`|Recommended|Free from developer.company-information.service.gov.uk — unlocks full UK data|
-|`OPENCORPORATES\\\_API\\\_TOKEN`|Optional|Higher rate limits on global search|
-
-\---
-
-## Use Cases
-
-* **KYC automation** — Verify counterparties before onboarding
-* **Due diligence agents** — Automated company research for M\&A and investment
-* **Compliance workflows** — Screen companies against registry data
-* **Legal research** — Director history, filing compliance, company status
-* **Trade finance** — Verify buyers, sellers, and intermediaries in commodity deals
-* **Credit underwriting** — Company age, filing history, officer stability
-
-\---
+| Registry | Coverage |
+|---|---|
+| UK Companies House | 5M+ UK companies, full filing history |
+| Singapore ACRA | All Singapore-registered entities |
+| US SEC EDGAR | All US public company filings |
+| OpenCorporates | 210M+ companies, 130+ jurisdictions |
 
 ## Pricing
 
-|Tier|Price|Calls|
-|-|-|-|
-|Free|—|100 calls/month|
-|Pro|$299/month|10,000 calls/month|
-|Enterprise|$999/month|Unlimited + SLA|
+| Plan | Calls | Price |
+|---|---|---|
+| Free | 100/month | No API key required |
+| Pro | 10,000/month | $299/month |
+| Enterprise | Unlimited | $999/month |
 
-\---
+Upgrade at **[kordagencies.com](https://kordagencies.com)**
 
-## Support
+When you hit the free limit you will receive a message in the tool response with a link to upgrade.
 
-* GitHub Issues: [github.com/OjasKord/bizfile-mcp/issues](https://github.com/OjasKord/bizfile-mcp/issues)
-* Email: contact@bizfilemcp.com
+## Use Cases
 
-\---
+- **Trade finance** — verify counterparties before signing contracts
+- **KYC/AML** — screen companies as part of onboarding workflows
+- **Due diligence** — assess risk before investments or partnerships
+- **Compliance** — check company status and officer history
+- **Legal** — verify registered address and company standing
 
-## Legal
+## Connect
 
-All data retrieved from official public government registries. This tool does not provide legal or financial advice. Always verify critical information with qualified professionals.
-
-MIT License
-
+- Website: [kordagencies.com](https://kordagencies.com)
+- Smithery: [smithery.ai/server/OjasKord/bizfile-mcp](https://smithery.ai/server/OjasKord/bizfile-mcp)
+- GitHub: [github.com/OjasKord/bizfile-mcp](https://github.com/OjasKord/bizfile-mcp)
+- Contact: ojas@kordagencies.com
