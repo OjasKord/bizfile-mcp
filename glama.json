@@ -1,0 +1,36 @@
+{
+  "$schema": "https://glama.ai/mcp/servers/schema.json",
+  "name": "Bizfile MCP",
+  "description": "Real-time company verification, KYC, and due diligence across 130+ jurisdictions. Connects directly to official government registries — UK Companies House, Singapore ACRA, SEC EDGAR, and OpenCorporates. Free tier: 100 calls/month, no API key required.",
+  "license": "MIT",
+  "homepage": "https://kordagencies.com",
+  "repository": "https://github.com/OjasKord/bizfile-mcp",
+  "keywords": ["kyc", "company-verification", "trade-finance", "due-diligence", "compliance", "companies-house", "acra", "singapore", "uk", "sec-edgar"],
+  "author": {
+    "name": "Ojas",
+    "email": "ojas@kordagencies.com",
+    "url": "https://kordagencies.com"
+  },
+  "tools": [
+    {
+      "name": "search_company",
+      "description": "Search for companies by name across 130+ jurisdictions"
+    },
+    {
+      "name": "get_company_profile",
+      "description": "Get full company profile including status, address, SIC codes and filing history"
+    },
+    {
+      "name": "verify_company",
+      "description": "KYC verification returning confidence rating HIGH/MEDIUM/LOW"
+    },
+    {
+      "name": "check_company_risk",
+      "description": "AI risk assessment returning score 0-100 with risk factors and recommendations"
+    },
+    {
+      "name": "get_officers",
+      "description": "Get directors and officers including appointment dates and resignation history"
+    }
+  ]
+}
