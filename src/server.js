@@ -256,7 +256,26 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
-
+if (req.url === '/stats' && req.method === 'GET') {
+    const statsKey = req.headers['x-stats-key'];
+    if (statsKey !== 'ojas2026') {
+      res.writeHead(401, corsHeaders);
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+    const stats = {
+      free_tier_users: freeTierUsage.size,
+      free_tier_total_calls: Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0),
+      paid_keys_issued: apiKeys.size,
+      top_ips: Array.from(freeTierUsage.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([ip, calls]) => ({ ip: ip.slice(0, 8) + '...', calls }))
+    };
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(stats));
+    return;
+  }
 server.listen(PORT, () => {
   console.log(`Bizfile MCP v3.0.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
