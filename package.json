@@ -1,10 +1,10 @@
 {
   "name": "bizfile-mcp",
   "mcpName": "io.github.OjasKord/bizfile-mcp",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Real-time company verification, KYC, and due diligence across 130+ jurisdictions. Search companies, verify identities, assess risk, and get officer data from UK Companies House, Singapore ACRA, and US SEC EDGAR.",
   "main": "src/server.js",
-    "scripts": {
+  "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
   },
@@ -23,13 +23,14 @@
     "corporate-intelligence",
     "aml",
     "trade-finance",
+    "sanctions-screening",
     "fintech",
     "legal",
     "risk"
   ],
   "author": "OjasKord",
-  "license": "MIT",
-  "homepage": "https://github.com/OjasKord/bizfile-mcp",
+  "license": "UNLICENSED",
+  "homepage": "https://kordagencies.com",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OjasKord/bizfile-mcp.git"
