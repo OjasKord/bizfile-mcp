@@ -1,6 +1,30 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const fs = require('fs');
+
+const PERSIST_FILE = '/tmp/bizfile_stats.json';
+
+function saveStats() {
+  try {
+    const data = {
+      freeTierUsage: Array.from(freeTierUsage.entries()),
+      usageLog: usageLog.slice(-1000)
+    };
+    fs.writeFileSync(PERSIST_FILE, JSON.stringify(data));
+  } catch(e) { console.error('Stats save error:', e.message); }
+}
+
+function loadStats() {
+  try {
+    if (fs.existsSync(PERSIST_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PERSIST_FILE, 'utf8'));
+      if (data.freeTierUsage) data.freeTierUsage.forEach(([k, v]) => freeTierUsage.set(k, v));
+      if (data.usageLog) usageLog.push(...data.usageLog);
+      console.log(`Stats loaded: ${freeTierUsage.size} IPs, ${usageLog.length} calls`);
+    }
+  } catch(e) { console.error('Stats load error:', e.message); }
+}
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
@@ -265,6 +289,7 @@ function checkAccess(req) {
     return { allowed: false, reason: `Free tier limit of ${FREE_TIER_LIMIT} calls reached. Upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.`, tier: 'free_limit_reached' };
   }
   freeTierUsage.set(ip, calls + 1);
+  saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
   return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? `${remaining} free calls remaining. Upgrade at kordagencies.com` : null };
 }
@@ -323,7 +348,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '4.2.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: '4.3.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
@@ -387,7 +412,7 @@ const server = http.createServer(async (req, res) => {
 
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.2.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.3.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -401,6 +426,7 @@ const server = http.createServer(async (req, res) => {
           const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
           usageLog.push({ tool: name, tier: req._tier || (sanctionsMeta ? sanctionsMeta.plan : 'paid'), time: new Date().toISOString(), ip: ip.slice(0,8) + '...' });
           if (usageLog.length > 1000) usageLog.shift();
+          saveStats();
 
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
@@ -428,7 +454,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.2.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.3.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -436,7 +462,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Bizfile MCP v4.2.0 running on port ${PORT}`);
+  loadStats();
+  console.log(`Bizfile MCP v4.3.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
   console.log(`Sanctions screening: ${OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'}`);
   console.log(`Resend: ${RESEND_API_KEY ? 'configured' : 'MISSING'}`);
