@@ -1,0 +1,8 @@
+.mcpregistry_github_token
+.mcpregistry_registry_token
+.env
+.env.example
+node_modules/
+MCP-Build-Playbook.pdf
+mcp-publisher.exe
+test.js
