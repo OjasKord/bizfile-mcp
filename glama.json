@@ -1,11 +1,11 @@
 {
   "$schema": "https://glama.ai/mcp/servers/schema.json",
   "name": "Bizfile MCP",
-  "description": "Real-time company verification, KYC, and due diligence across 130+ jurisdictions. Connects directly to official government registries — UK Companies House, Singapore ACRA, SEC EDGAR, and OpenCorporates. Free tier: 100 calls/month, no API key required.",
+  "description": "Company intelligence and sanctions screening across 130+ jurisdictions and 328 global sanctions lists. Free tier: 20 calls/month, no API key required.",
   "license": "MIT",
   "homepage": "https://kordagencies.com",
   "repository": "https://github.com/OjasKord/bizfile-mcp",
-  "keywords": ["kyc", "company-verification", "trade-finance", "due-diligence", "compliance", "companies-house", "acra", "singapore", "uk", "sec-edgar"],
+  "keywords": ["kyc", "company-verification", "trade-finance", "due-diligence", "compliance", "sanctions-screening", "ofac", "companies-house", "acra", "singapore", "uk", "sec-edgar", "aml"],
   "author": {
     "name": "Ojas",
     "email": "ojas@kordagencies.com",
@@ -14,23 +14,27 @@
   "tools": [
     {
       "name": "search_company",
-      "description": "Search for companies by name across 130+ jurisdictions"
+      "description": "Search for companies by name across UK Companies House, Singapore ACRA, US SEC EDGAR, and 130+ jurisdictions. Returns registration number, status, address, incorporation date."
     },
     {
       "name": "get_company_profile",
-      "description": "Get full company profile including status, address, SIC codes and filing history"
+      "description": "Get full company registry profile including status, registered address, SIC codes, accounts filing dates and confirmation statement status."
     },
     {
       "name": "verify_company",
-      "description": "KYC verification returning confidence rating HIGH/MEDIUM/LOW"
+      "description": "KYC-style verification returning confidence rating HIGH/MEDIUM/LOW, name match, number match, and active status."
     },
     {
       "name": "check_company_risk",
-      "description": "AI risk assessment returning score 0-100 with risk factors and recommendations"
+      "description": "AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, risk factors, and recommended due diligence actions."
     },
     {
       "name": "get_officers",
-      "description": "Get directors and officers including appointment dates and resignation history"
+      "description": "Get full directors and officers list including appointment dates, resignation dates, roles, and nationalities. Use for UBO and beneficial ownership checks."
+    },
+    {
+      "name": "screen_entity",
+      "description": "Screen a person, company, or vessel against 328 global sanctions lists including OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 318 more. Returns BLOCK/ENHANCED_DUE_DILIGENCE/PROCEED with trade finance specific guidance. Paid API key required. Cost: 0.15 GBP per check (Pro), 0.125 GBP per check (Enterprise)."
     }
   ]
 }
