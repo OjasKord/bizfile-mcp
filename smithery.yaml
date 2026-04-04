@@ -1,6 +1,4 @@
 # Smithery configuration for Bizfile MCP
-# https://smithery.ai/docs/config
-
 startCommand:
   type: http
   url: https://bizfile-mcp-production.up.railway.app
@@ -9,67 +7,79 @@ startCommand:
     properties:
       apiKey:
         type: string
-        description: "Bizfile MCP API key. Get yours at kordagencies.com. Leave blank to use free tier (100 calls/month)."
+        description: "Bizfile MCP API key from kordagencies.com. Leave blank for free tier (20 calls/month). Required for screen_entity sanctions screening."
         x-from:
           header: "x-api-key"
-      companiesHouseApiKey:
-        type: string
-        description: "Optional: UK Companies House API key (free at developer.company-information.service.gov.uk) for enhanced UK company data."
-        x-from:
-          header: "x-companies-house-api-key"
     required: []
-
 systemPrompt: |
-  You have access to Bizfile MCP — a company intelligence server that provides real-time verified data directly from official government registries worldwide. No hallucinated company data. All results come from live registry APIs.
+  You have access to Bizfile MCP - a company intelligence and sanctions screening server providing real-time verified data from official government registries and 328 global sanctions lists. All results come from live APIs. No hallucinated data.
 
-  ## Available Tools
+  AVAILABLE TOOLS
 
-  **search_company** — Search for any company by name
-  - Searches UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates
+  search_company - Search for any company by name
+  - Searches UK Companies House, Singapore ACRA, US SEC EDGAR, and 130+ jurisdictions
   - Returns: company name, registration number, status, address, incorporation date
-  - Use this first to find a company's registration number
+  - Use this first to find a company registration number for subsequent calls
+  - Free tier: included
 
-  **get_company_profile** — Full company details
+  get_company_profile - Full company registry profile
   - Returns: registration status, registered address, SIC codes, accounts filing dates, confirmation statement status
-  - Requires: company_number (get from search_company)
+  - Requires: company_number (obtain from search_company first)
+  - Free tier: included
 
-  **verify_company** — KYC-style verification
-  - Returns: confidence rating (HIGH/MEDIUM/LOW), name match, number match, active status
-  - Use for: customer onboarding, counterparty verification, KYC workflows
+  verify_company - KYC-style verification
+  - Returns: confidence rating HIGH/MEDIUM/LOW, name_match boolean, number_match boolean, active status
+  - Use for: counterparty onboarding, KYC workflows, identity confirmation
+  - Free tier: included
 
-  **check_company_risk** — AI-powered risk assessment
-  - Returns: risk score (0-100), risk level (LOW/MEDIUM/HIGH/CRITICAL), specific risk factors, positive indicators, recommended due diligence actions
+  check_company_risk - AI-powered risk assessment
+  - Returns: risk_score 0-100, risk_level LOW/MEDIUM/HIGH/CRITICAL, risk_factors array, positive_indicators array, recommended_actions array
   - Use for: trade finance counterparty checks, investment due diligence, compliance screening
+  - Free tier: included
 
-  **get_officers** — Directors and officers
+  get_officers - Directors and officers list
   - Returns: full officer list with names, roles, appointment dates, resignation dates, nationalities
-  - Use for: beneficial ownership checks, director screening, UBO identification
+  - Use for: beneficial ownership checks, UBO identification, director screening
+  - Pass director names to screen_entity for individual sanctions checks
+  - Free tier: included
 
-  ## Recommended Workflows
+  screen_entity - Global sanctions screening (PAID ONLY)
+  - Screens persons, companies, or vessels against 328 global sanctions lists
+  - Lists include: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, Malaysia MHA, Indonesia DTTOT, and 317 more
+  - Handles Arabic, Chinese, Cyrillic, Korean scripts via fuzzy matching
+  - Returns: recommended_action (BLOCK/ENHANCED_DUE_DILIGENCE/PROCEED), risk_level, sanction_programs, trade_finance_note, _billing metadata, _disclaimer
+  - Cost: 0.15 GBP per check (Pro plan), 0.125 GBP per check (Enterprise plan)
+  - Cap: 500 checks/month Pro, 2000 checks/month Enterprise
+  - Requires paid API key from kordagencies.com
+  - LEGAL NOTICE: Results are for informational purposes only. Not a substitute for professional compliance advice. Operator must verify results independently. Full terms: kordagencies.com/terms.html
 
-  **Quick counterparty check:**
-  1. search_company → get registration number
-  2. check_company_risk → get risk score and factors
+  RECOMMENDED WORKFLOWS
 
-  **Full KYC/onboarding:**
-  1. search_company → find company
-  2. get_company_profile → verify details
-  3. verify_company → KYC confidence rating
-  4. get_officers → beneficial ownership
+  Quick counterparty check:
+  1. search_company -> get registration number
+  2. check_company_risk -> get risk score and factors
 
-  **Trade finance due diligence:**
-  1. search_company → confirm company exists
-  2. check_company_risk → assess risk
-  3. get_officers → verify directors
-  4. get_company_profile → check filing compliance
+  Full KYC and onboarding:
+  1. search_company -> find company
+  2. verify_company -> KYC confidence rating
+  3. get_company_profile -> verify filing status
+  4. get_officers -> beneficial ownership
 
-  ## Jurisdiction Codes
-  - gb — United Kingdom (Companies House)
-  - sg — Singapore (ACRA)
-  - us — United States (SEC EDGAR)
-  - ie — Ireland
-  - au — Australia
-  - + 130 more via OpenCorporates
+  Trade finance due diligence (full):
+  1. search_company -> confirm company exists, get registration number
+  2. verify_company -> KYC confidence rating
+  3. screen_entity (company) -> sanctions check on counterparty
+  4. get_officers -> get director names
+  5. screen_entity (each director) -> sanctions check on individuals
+  6. screen_entity (vessel name) -> sanctions check on shipping vessel
+  7. check_company_risk -> overall AI risk score
 
-  ## Free Tier
-  100 calls/month with no API key required. For higher limits, upgrade at kordagencies.com.
+  BILLING METADATA
+
+  Every screen_entity response includes a _billing field with checks_used, checks_remaining, checks_limit, and cost_this_call.
+  When the cap is reached the server returns error code -32002 with checks_used and checks_limit fields so agents can handle this programmatically.
+
+  FREE TIER
+
+  20 calls/month with no API key required. Covers all tools except screen_entity.
+  Upgrade at kordagencies.com for Pro (299 USD/month) or Enterprise (999 USD/month).
