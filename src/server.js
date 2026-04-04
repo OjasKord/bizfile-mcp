@@ -42,8 +42,8 @@ async function sendApiKeyEmail(email, apiKey, plan) {
   const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
   const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
   const sanctionsLimit = plan === 'enterprise' ? '2,000' : '500';
-  const sanctionsPrice = plan === 'enterprise' ? '£0.125' : '£0.15';
-  const html = `<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP · ${planLabel} Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><p style="color:#8A95A8;margin-bottom:32px">Welcome to Bizfile MCP. Here is everything you need to get started.</p><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all;font-weight:500">${apiKey}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Add to your MCP config</div><div style="color:#86EFAC;font-size:12px;line-height:2">{<br>&nbsp;&nbsp;"bizfile": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"url": "https://bizfile-mcp-production.up.railway.app",<br>&nbsp;&nbsp;&nbsp;&nbsp;"headers": { "x-api-key": "${apiKey}" }<br>&nbsp;&nbsp;}<br>}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Your Plan</div><div style="color:#E8EDF5;font-size:13px;line-height:2">Plan: ${planLabel}<br>Company intelligence calls: ${limit}/month<br>Sanctions screening: ${sanctionsPrice}/check (max ${sanctionsLimit}/month)<br>All 6 MCP tools included<br><br><span style="color:#BA7517">Note: Sanctions screening (screen_entity tool) is billed separately at ${sanctionsPrice} per check. You will only be charged for checks you actually use. Maximum ${sanctionsLimit} checks/month on this plan.</span></div></div><div style="background:#0D1219;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">By using your API key you agree to the Bizfile MCP Terms of Service at <a href="https://kordagencies.com/terms.html" style="color:#00E5C3">kordagencies.com/terms.html</a>. The Service is provided for informational purposes only and is not a substitute for professional compliance advice. Screening results do not constitute a legal determination of sanctions status. Provider maximum liability is limited to Subscription Fees paid in the preceding 3 months.</div><p style="color:#5A6478;font-size:12px">Questions? Email ojas@kordagencies.com</p><p style="color:#5A6478;font-size:12px;margin-top:8px">— Ojas, Kordagencies</p></div></body></html>`;
+  const sanctionsPrice = plan === 'enterprise' ? 'Aœ0.125' : 'Aœ0.15';
+  const html = `<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP Aú ${planLabel} Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><p style="color:#8A95A8;margin-bottom:32px">Welcome to Bizfile MCP. Here is everything you need to get started.</p><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all;font-weight:500">${apiKey}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Add to your MCP config</div><div style="color:#86EFAC;font-size:12px;line-height:2">{<br>&nbsp;&nbsp;"bizfile": {<br>&nbsp;&nbsp;&nbsp;&nbsp;"url": "https://bizfile-mcp-production.up.railway.app",<br>&nbsp;&nbsp;&nbsp;&nbsp;"headers": { "x-api-key": "${apiKey}" }<br>&nbsp;&nbsp;}<br>}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Your Plan</div><div style="color:#E8EDF5;font-size:13px;line-height:2">Plan: ${planLabel}<br>Company intelligence calls: ${limit}/month<br>Sanctions screening: ${sanctionsPrice}/check (max ${sanctionsLimit}/month)<br>All 6 MCP tools included<br><br><span style="color:#BA7517">Note: Sanctions screening (screen_entity tool) is billed separately at ${sanctionsPrice} per check. You will only be charged for checks you actually use. Maximum ${sanctionsLimit} checks/month on this plan.</span></div></div><div style="background:#0D1219;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">By using your API key you agree to the Bizfile MCP Terms of Service at <a href="https://kordagencies.com/terms.html" style="color:#00E5C3">kordagencies.com/terms.html</a>. The Service is provided for informational purposes only and is not a substitute for professional compliance advice. Screening results do not constitute a legal determination of sanctions status. Provider maximum liability is limited to Subscription Fees paid in the preceding 3 months.</div><p style="color:#5A6478;font-size:12px">Questions? Email ojas@kordagencies.com</p><p style="color:#5A6478;font-size:12px;margin-top:8px">ƒ?" Ojas, Kordagencies</p></div></body></html>`;
   return sendEmail(email, `Your Bizfile MCP ${planLabel} API Key`, html);
 }
 
@@ -130,7 +130,7 @@ const tools = [
   },
   {
     name: 'screen_entity',
-    description: 'Screen a person, company, or vessel against 328 global sanctions lists including OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 320+ more. Supports fuzzy name matching and handles Arabic, Chinese, Cyrillic, and other scripts. Returns match status, risk level, sanction programs hit, and recommended action. IMPORTANT: This tool is billed at £0.15/check for Pro plan and £0.125/check for Enterprise plan. Only available to paid API key holders. Use this tool to screen counterparties, beneficial owners, vessels, and intermediary banks before entering any trade finance transaction. LEGAL NOTICE: Results are for informational purposes only and do not constitute a legal determination of sanctions status or a compliance clearance. Operator must independently verify all results. Provider maximum liability is limited to 3 months subscription fees. Full terms: kordagencies.com/terms.html',
+    description: 'Screen a person, company, or vessel against 328 global sanctions lists including OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 320+ more. Supports fuzzy name matching and handles Arabic, Chinese, Cyrillic, and other scripts. Returns match status, risk level, sanction programs hit, and recommended action. IMPORTANT: This tool is billed at Aœ0.15/check for Pro plan and Aœ0.125/check for Enterprise plan. Only available to paid API key holders. Use this tool to screen counterparties, beneficial owners, vessels, and intermediary banks before entering any trade finance transaction. LEGAL NOTICE: Results are for informational purposes only and do not constitute a legal determination of sanctions status or a compliance clearance. Operator must independently verify all results. Provider maximum liability is limited to 3 months subscription fees. Full terms: kordagencies.com/terms.html',
     inputSchema: {
       type: 'object',
       properties: {
@@ -271,7 +271,7 @@ function checkAccess(req) {
 
 function checkSanctionsAccess(req) {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Note: billed at £0.15/check for Pro, £0.125/check for Enterprise.' };
+  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Note: billed at Aœ0.15/check for Pro, Aœ0.125/check for Enterprise.' };
   const record = apiKeys.get(apiKey);
   if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
   const plan = record.plan;
@@ -287,7 +287,7 @@ function checkSanctionsAccess(req) {
     checks_used: used + 1,
     checks_remaining: limit - used - 1,
     checks_limit: limit,
-    cost_this_call: `£${price.toFixed(3)}`,
+    cost_this_call: `Aœ${price.toFixed(3)}`,
     plan
   };
 }
@@ -323,7 +323,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '4.1.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: '4.2.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
@@ -387,11 +387,15 @@ const server = http.createServer(async (req, res) => {
 
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.1.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.2.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
           response = { jsonrpc: '2.0', id: request.id, result: { tools } };
+        } else if (request.method === 'resources/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
+        } else if (request.method === 'prompts/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         } else if (request.method === 'tools/call') {
           const { name, arguments: args } = request.params;
           const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
@@ -424,7 +428,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.0.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.2.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -432,7 +436,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Bizfile MCP v4.0.0 running on port ${PORT}`);
+  console.log(`Bizfile MCP v4.2.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
   console.log(`Sanctions screening: ${OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'}`);
   console.log(`Resend: ${RESEND_API_KEY ? 'configured' : 'MISSING'}`);
