@@ -129,27 +129,27 @@ async function screenEntityOpenSanctions(name, schema, country) {
 const tools = [
   {
     name: 'search_company',
-    description: 'Call this tool when you need to find or confirm a company exists before doing business with them, issuing a Letter of Credit, signing a contract, or onboarding them as a customer. Searches UK Companies House, Singapore ACRA, US SEC EDGAR, and 130+ jurisdictions. Returns registration number needed for all other tools. Free tier: first 20 calls require no API key.',
+    description: 'Search for companies by name across global registries including UK Companies House, Singapore ACRA, and 130+ jurisdictions via OpenCorporates. No API key required for first 20 calls.',
     inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] }
   },
   {
     name: 'get_company_profile',
-    description: 'Call this tool when you need to verify a company is properly registered, check if their filings are up to date, or confirm their registered address before executing a trade or financial transaction. Returns full registry profile. Requires registration number from search_company. Free tier: first 20 calls require no API key.',
+    description: 'Get full company profile including registration status, address, SIC codes, accounts and filing history. No API key required for first 20 calls.',
     inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
   },
   {
     name: 'verify_company',
-    description: 'Call this tool when you need a KYC confidence rating before onboarding a new supplier, approving a credit application, or completing a compliance check. Returns HIGH/MEDIUM/LOW confidence with specific reasons. Free tier: first 20 calls require no API key.',
+    description: 'KYC-style verification returning confidence rating HIGH/MEDIUM/LOW and identity confirmation. No API key required for first 20 calls.',
     inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
   },
   {
     name: 'check_company_risk',
-    description: 'Call this tool when you need to assess whether a counterparty is safe to do business with before signing a contract, issuing payment, or approving a trade finance transaction. Returns risk score 0-100, red flags, and recommended actions. Free tier: first 20 calls require no API key.',
+    description: 'AI-powered risk assessment returning score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors and recommended due diligence actions. No API key required for first 20 calls.',
     inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
   },
   {
     name: 'get_officers',
-    description: 'Call this tool when you need to identify who controls a company for beneficial ownership checks, UBO identification, or director screening. Returns full director list. Use director names as inputs to screen_entity for sanctions checks. Free tier: first 20 calls require no API key.',
+    description: 'Get full list of directors and officers including appointment dates, roles, nationalities and resignation history. No API key required for first 20 calls.',
     inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
   },
   {
@@ -348,7 +348,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '4.4.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: '4.5.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
@@ -412,7 +412,7 @@ const server = http.createServer(async (req, res) => {
 
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.4.0', description: 'Company intelligence and sanctions screening for AI agents. Free tier: 20 calls/month. Upgrade at kordagencies.com' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.5.0', description: 'Counterparty trust layer for AI agents. Verify any company before doing business. Catches scammers, shell companies, and sanctioned entities. Free tier: 20 calls/month.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -454,7 +454,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.4.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.5.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -463,7 +463,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   loadStats();
-  console.log(`Bizfile MCP v4.3.0 running on port ${PORT}`);
+  console.log(`Bizfile MCP v4.5.0 running on port ${PORT}`);
   console.log(`Free tier: ${FREE_TIER_LIMIT} calls/IP, no API key required`);
   console.log(`Sanctions screening: ${OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'}`);
   console.log(`Resend: ${RESEND_API_KEY ? 'configured' : 'MISSING'}`);
