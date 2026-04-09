@@ -1,8 +1,8 @@
 <!-- mcp-name: io.github.OjasKord/bizfile-mcp -->
 
-# Bizfile MCP — Company Intelligence for AI Agents
+# Bizfile MCP — Counterparty Trust Layer for AI Agents
 
-Real-time company verification, KYC, due diligence, and sanctions screening across 130+ jurisdictions. Connects directly to official government registries — no scraped data, no hallucinations.
+Verify any company before doing business with them. Real-time company verification, AI-powered risk assessment, and sanctions screening across 328 global lists. Data sourced directly from official government registries — not scraped, not cached, not hallucinated.
 
 **Free tier: 20 calls/month. No API key required. Just connect and go.**
 
@@ -24,140 +24,128 @@ Or via Smithery:
 npx -y @smithery/cli@latest mcp add OjasKord/bizfile-mcp
 ```
 
-No API key needed for the first 20 calls.
+No API key needed for the first 20 calls/month.
+
+## Why Use This
+
+Before your agent signs a contract, makes a payment, onboards a supplier, or enters any B2B relationship — it should verify the counterparty is real, active, and not on a sanctions list. Scammers use dissolved companies, shell companies, and names similar to legitimate businesses. One check takes 2 seconds. Missing it can cost thousands.
 
 ## Tools
 
 ### `search_company`
-Search for any company by name across UK Companies House, Singapore ACRA, and 130+ jurisdictions.
+Search for any company by name in official government registries. Use before any B2B transaction to confirm the company exists.
 
 ```json
 { "query": "Shell", "jurisdiction": "gb" }
 ```
 
 ### `get_company_profile`
-Full company profile — registration status, address, SIC codes, accounts, filing history.
+Full company profile — registration status, address, SIC codes, accounts, filing history. Sourced directly from UK Companies House API.
 
 ```json
 { "company_number": "00445790", "jurisdiction": "gb" }
 ```
 
 ### `verify_company`
-KYC-style verification returning confidence rating (HIGH / MEDIUM / LOW).
+KYC-style verification returning confidence rating HIGH / MEDIUM / LOW. Confirms name match, registration number match, and active status.
 
 ```json
 { "company_name": "Shell UK Limited", "company_number": "00445790" }
 ```
 
-### `check_company_risk`
-AI-powered risk assessment — score 0-100, risk level, specific risk factors, recommended due diligence actions.
+### `check_company_risk` *(AI-powered — NOT a database lookup)*
+AI analysis synthesising official registry data into a risk score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors, and recommended due diligence actions. Catches recently incorporated companies, dissolved status, high-risk SIC codes, abnormal filing history, and shell company indicators.
 
 ```json
 { "company_name": "Acme Trading Ltd", "jurisdiction": "gb" }
 ```
 
 ### `get_officers`
-Full directors and officers list — appointment dates, roles, nationalities, resignation history.
+Full directors and officers list — appointment dates, roles, nationalities, resignation history. Use to identify who controls a company before entering a significant contract.
 
 ```json
 { "company_number": "00445790" }
 ```
 
 ### `screen_entity` *(Pro / Enterprise only)*
-Sanctions screening across 328 global lists including OFAC, UN, EU, UK, MAS Singapore, Australia DFAT, and more. Returns match status, matched entity details, and billing metadata.
+Sanctions screening across 328 global lists via OpenSanctions API (api.opensanctions.org) — updated daily. Covers OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 320+ more. Supports fuzzy name matching and handles Arabic, Chinese, Cyrillic scripts.
 
 ```json
-{ "name": "Acme Trading Ltd", "entity_type": "company" }
+{ "name": "Acme Trading Ltd", "entity_type": "Company", "country": "gb" }
 ```
 
-Cost: GBP 0.15 per check (Pro), GBP 0.125 per check (Enterprise). Cap: 500/month (Pro), 2,000/month (Enterprise).
+Cost: GBP 0.15/check (Pro), GBP 0.125/check (Enterprise). Cap: 500/month Pro, 2,000/month Enterprise.
 
-LEGAL NOTICE: Results are for informational purposes only and do not constitute a compliance clearance. Full terms: kordagencies.com/terms.html
+## Example Responses
 
-## Example Usage
-
-```
-User: Check the risk of Acme Trading Ltd before we sign a contract.
-
-Agent calls: check_company_risk({ "company_name": "Acme Trading Ltd" })
-
-Response:
+**check_company_risk:**
+```json
 {
   "risk_score": 23,
   "risk_level": "LOW",
+  "analysis_type": "AI-powered — NOT a simple database lookup",
   "risk_factors": ["Relatively new company (incorporated 2019)"],
   "positive_indicators": ["Active status", "Consistent filing history", "3 directors"],
   "recommended_actions": ["Request last 2 years accounts", "Verify director identities"],
-  "summary": "Acme Trading Ltd is a low-risk counterparty with consistent compliance history..."
+  "summary": "Acme Trading Ltd is a low-risk counterparty with consistent compliance history.",
+  "source_url": "api.company-information.service.gov.uk",
+  "checked_at": "2026-04-09T06:17:00Z"
 }
 ```
 
 ## Data Sources
 
-| Registry | Coverage |
-|---|---|
-| UK Companies House | 5M+ UK companies, full filing history |
-| Singapore ACRA | All Singapore-registered entities |
-| US SEC EDGAR | All US public company filings |
-| OpenCorporates | 210M+ companies, 130+ jurisdictions |
-| OpenSanctions | 328 global sanctions lists |
-
-## Pricing
-
-| Plan | Calls | Price |
+| Tool | Data Source | Update Frequency |
 |---|---|---|
-| Free | 20/month | No API key required |
-| Pro | 10,000/month + 500 sanctions checks | $299/month |
-| Enterprise | Unlimited + 2,000 sanctions checks | $999/month |
+| search_company | UK Companies House (api.company-information.service.gov.uk) | Real-time |
+| get_company_profile | UK Companies House (api.company-information.service.gov.uk) | Real-time |
+| verify_company | UK Companies House (api.company-information.service.gov.uk) | Real-time |
+| check_company_risk | UK Companies House + AI synthesis | Real-time |
+| get_officers | UK Companies House (api.company-information.service.gov.uk) | Real-time |
+| screen_entity | OpenSanctions (api.opensanctions.org) — 328 lists | Daily |
 
-Upgrade at **[kordagencies.com](https://kordagencies.com)**
-
-When you hit the free limit you will receive a machine-readable error in the tool response with a link to upgrade.
+Every response includes `source_url` and `checked_at` so agents can verify exactly where data came from and when.
 
 ## Recommended Workflows
 
-**Quick counterparty check:**
-1. `search_company` — find the company and get registration number
-2. `check_company_risk` — get risk score and due diligence actions
+**Quick counterparty check (2 calls):**
+1. `search_company` — confirm company exists, get registration number
+2. `check_company_risk` — AI risk score and due diligence actions
 
-**Full KYC onboarding:**
+**Full KYC onboarding (5 calls):**
 1. `search_company` — confirm company exists
 2. `get_company_profile` — verify registration details
 3. `verify_company` — KYC confidence rating
 4. `get_officers` — beneficial ownership check
 5. `screen_entity` — sanctions screening (paid)
 
-**Trade finance due diligence:**
-1. `search_company` — confirm counterparty exists
-2. `check_company_risk` — assess risk before contract
-3. `get_officers` — verify directors
-4. `screen_entity` — sanctions check on entity and directors
+**Ongoing monitoring (monthly):**
+- `screen_entity` on all active counterparties — sanctions lists change daily
 
-## Jurisdiction Codes
+## Pricing
 
-- `gb` — United Kingdom (Companies House)
-- `sg` — Singapore (ACRA)
-- `us` — United States (SEC EDGAR)
-- `ie` — Ireland
-- `au` — Australia
-- 130+ more via OpenCorporates
+| Plan | Calls | Sanctions | Price |
+|---|---|---|---|
+| Free | 20/month | Not included | No API key required |
+| Pro | 10,000/month | 500 checks/month at GBP 0.15/check | $299/month |
+| Enterprise | Unlimited | 2,000 checks/month at GBP 0.125/check | $999/month |
 
-## Use Cases
+Upgrade at **[kordagencies.com](https://kordagencies.com)**
 
-- **Trade finance** — verify counterparties before signing contracts
-- **KYC/AML** — screen companies as part of onboarding workflows
-- **Due diligence** — assess risk before investments or partnerships
-- **Sanctions compliance** — screen against 328 global sanctions lists
-- **Compliance** — check company status and officer history
-- **Legal** — verify registered address and company standing
+When you hit the free limit you receive a machine-readable error with an upgrade URL.
+
+## Reliability
+
+- Uptime monitored every 5 minutes via UptimeRobot
+- Version history documented in [CHANGELOG.md](CHANGELOG.md)
+- Health endpoint: `GET /health`
 
 ## Legal
 
-Use of this service is subject to the Terms of Service at [kordagencies.com/terms.html](https://kordagencies.com/terms.html). Results are provided for informational purposes only and do not constitute legal, compliance, or professional advice. Maximum liability is limited to 3 months of subscription fees paid.
+Results are sourced directly from official government registries and sanctions databases. We do not log or store your query content. Results are for informational purposes only and do not constitute legal, compliance, or professional advice. Maximum liability limited to 3 months subscription fees. Full terms: [kordagencies.com/terms.html](https://kordagencies.com/terms.html)
 
 ## Connect
 
 - Website: [kordagencies.com](https://kordagencies.com)
 - Smithery: [smithery.ai/server/OjasKord/bizfile-mcp](https://smithery.ai/server/OjasKord/bizfile-mcp)
-- GitHub: [github.com/OjasKord/bizfile-mcp](https://github.com/OjasKord/bizfile-mcp)
 - Contact: ojas@kordagencies.com
