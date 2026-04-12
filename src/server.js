@@ -460,6 +460,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/deps' && req.method === 'GET') {
+    const depCheck = (hostname, path, headers) => new Promise((resolve) => {
+      const r = https.request({ hostname, path, method: 'GET', headers: Object.assign({ 'User-Agent': 'Bizfile-MCP-HealthCheck/1.0' }, headers || {}) }, (res2) => {
+        res2.resume();
+        resolve({ ok: res2.statusCode < 500, status: res2.statusCode });
+      });
+      r.on('error', () => resolve({ ok: false, status: 0, error: 'unreachable' }));
+      r.setTimeout(5000, () => { r.destroy(); resolve({ ok: false, status: 0, error: 'timeout' }); });
+      r.end();
+    });
+    const [ch, os, ai] = await Promise.all([
+      depCheck('api.company-information.service.gov.uk', '/search/companies?q=test&items_per_page=1'),
+      depCheck('api.opensanctions.org', '/healthz'),
+      depCheck('api.anthropic.com', '/v1/models', { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' })
+    ]);
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ server: 'bizfile-mcp', checked_at: nowISO(), dependencies: { companies_house: ch, opensanctions: os, anthropic: ai } }));
+    return;
+  }
+
   if (req.url === '/stats' && req.method === 'GET') {
     if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
