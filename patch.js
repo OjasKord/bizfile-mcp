@@ -1,0 +1,1 @@
+const fs=require('fs');let c=fs.readFileSync('C:/bizfile-mcp/src/server_backup_v480.js','utf8');c=c.replace(/4\.8\.0/g,'4.9.0');console.log('size:'+c.length+' has48:'+c.includes('4.8.0')+' has49:'+c.includes('4.9.0'));fs.writeFileSync('C:/bizfile-mcp/src/server.js',c);console.log('done');  
