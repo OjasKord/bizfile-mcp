@@ -33,6 +33,7 @@ const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
 const freeTierUsage = new Map();
 const usageLog = [];
 const FREE_TIER_LIMIT = 20;
+const FREE_TIER_WARNING = 16; // warn at 80% usage
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
 const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
@@ -458,7 +459,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '4.9.0', service: 'counterparty-validator-mcp', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: '4.10.0', service: 'counterparty-validator-mcp', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
@@ -537,7 +538,7 @@ const server = http.createServer(async (req, res) => {
         let response;
 
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.9.0', description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.10.0', description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -555,6 +556,20 @@ const server = http.createServer(async (req, res) => {
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
           if (sanctionsMeta) result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
+
+          // Partial response for free tier on validate_counterparty
+          if (name === 'validate_counterparty' && req._tier === 'free' && !result.error) {
+            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+            const used = freeTierUsage.get(ip) || 0;
+            const remaining = FREE_TIER_LIMIT - used;
+            const isWarning = used >= FREE_TIER_WARNING;
+            const gated = ['risk_factors', 'positive_indicators', 'recommended_actions', 'risk_summary', 'directors_and_officers', 'sic_codes', 'registered_address', 'accounts_last_filed', 'sanctions_screening_note'];
+            gated.forEach(f => delete result[f]);
+            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + FREE_TIER_LIMIT + ' calls remaining this month. Upgrade to Pro ($299/month) at kordagencies.com for full risk factors, officer list, recommended actions, and sanctions screening note.';
+            result._gated_fields = gated;
+            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Upgrade to Pro at kordagencies.com to avoid interruption.';
+          }
+
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
         } else {
           response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
@@ -572,7 +587,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.9.0', status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.10.0', status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
@@ -581,7 +596,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   loadStats();
-  console.log('Counterparty Validator MCP v4.9.0 running on port ' + PORT);
+  console.log('Counterparty Validator MCP v4.10.0 running on port ' + PORT);
   console.log('Tools: 2 (validate_counterparty, screen_counterparty)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
   console.log('Sanctions screening: ' + (OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'));
