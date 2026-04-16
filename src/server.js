@@ -3,24 +3,12 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const PERSIST_FILE = '/tmp/vat_stats.json';
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const PORT = process.env.PORT || 3000;
-const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-
-const freeTierUsage = new Map();
-const usageLog = [];
-const FREE_TIER_LIMIT = 20;
-const apiKeys = new Map();
-const PLAN_LIMITS = { pro: 5000, enterprise: Infinity };
+const PERSIST_FILE = '/tmp/bizfile_stats.json';
 
 function saveStats() {
   try {
-    fs.writeFileSync(PERSIST_FILE, JSON.stringify({
-      freeTierUsage: Array.from(freeTierUsage.entries()),
-      usageLog: usageLog.slice(-1000)
-    }));
+    const data = { freeTierUsage: Array.from(freeTierUsage.entries()), usageLog: usageLog.slice(-1000) };
+    fs.writeFileSync(PERSIST_FILE, JSON.stringify(data));
   } catch(e) { console.error('Stats save error:', e.message); }
 }
 
@@ -35,15 +23,36 @@ function loadStats() {
   } catch(e) { console.error('Stats load error:', e.message); }
 }
 
-function generateApiKey() { return 'vat_' + crypto.randomBytes(24).toString('hex'); }
-function getPlanFromProduct(name) {
-  if (!name) return 'pro';
-  return name.toLowerCase().includes('enterprise') ? 'enterprise' : 'pro';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
+const PORT = process.env.PORT || 3000;
+const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
+
+const freeTierUsage = new Map();
+const usageLog = [];
+const FREE_TIER_LIMIT = 20;
+const apiKeys = new Map();
+const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
+const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
+const SANCTIONS_PRICE = { pro: 0.15, enterprise: 0.125 };
+
+const LEGAL_DISCLAIMER = 'Results are sourced directly from official government registries (UK Companies House, Singapore ACRA, US SEC EDGAR) and the OpenSanctions database (api.opensanctions.org) covering 328 global sanctions lists. We do not log or store your query content. Results are for informational purposes only and do not constitute a legal determination of company status or sanctions clearance. Operator must independently verify all results before making compliance decisions. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
+
+const DASHBOARD_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Kord Agencies — MCP Dashboard</title>\n<style>\n* { box-sizing: border-box; margin: 0; padding: 0; }\nbody { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0D1117; color: #E8EDF5; font-size: 15px; line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }\nh1 { font-size: 18px; font-weight: 500; color: #fff; }\n.subtitle { font-size: 12px; color: #5A6478; margin-top: 2px; }\n.top-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }\nbutton { font-size: 13px; padding: 7px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: #E8EDF5; cursor: pointer; }\nbutton:hover { background: rgba(255,255,255,0.06); }\n.summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }\n.card { background: #141B24; border-radius: 8px; padding: 14px 16px; }\n.card-label { font-size: 11px; color: #8A95A8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }\n.card-value { font-size: 26px; font-weight: 500; color: #fff; line-height: 1; }\n.card-value.green { color: #00E5C3; }\n.card-value.amber { color: #EF9F27; }\n.card-sub { font-size: 11px; color: #5A6478; margin-top: 5px; }\n.servers-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }\n.server-panel { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; }\n.server-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }\n.server-name { font-size: 13px; font-weight: 500; }\n.server-name.bizfile { color: #00E5C3; }\n.server-name.vat { color: #A78BFA; }\n.server-name.tender { color: #EF9F27; }\n.server-name.lms { color: #7DD3FC; }\n.server-version { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #5A6478; flex-shrink: 0; }\n.status-dot.online { background: #00E5C3; box-shadow: 0 0 6px rgba(0,229,195,0.5); }\n.status-dot.offline { background: #E07070; }\n.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px; }\n.stat-row:last-child { border-bottom: none; }\n.stat-label { color: #5A6478; }\n.stat-value { color: #E8EDF5; font-weight: 500; font-family: monospace; }\n.stat-value.highlight { color: #00E5C3; }\n.stat-value.amber { color: #EF9F27; }\n.badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 4px; white-space: nowrap; }\n.badge.ok { background: rgba(0,229,195,0.12); color: #00E5C3; }\n.badge.err { background: rgba(224,112,112,0.12); color: #E07070; }\n.badge.warn { background: rgba(239,159,39,0.12); color: #EF9F27; }\n.badge.checking { background: rgba(255,255,255,0.06); color: #5A6478; }\n.tool-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }\n.tool-pill { border-radius: 4px; padding: 2px 8px; font-size: 11px; }\n.tool-pill.bizfile { background: rgba(0,229,195,0.08); border: 1px solid rgba(0,229,195,0.2); color: #00E5C3; }\n.tool-pill.vat { background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.2); color: #A78BFA; }\n.tool-pill.tender { background: rgba(239,159,39,0.08); border: 1px solid rgba(239,159,39,0.2); color: #EF9F27; }\n.tool-pill.lms { background: rgba(125,211,252,0.08); border: 1px solid rgba(125,211,252,0.2); color: #7DD3FC; }\n.call-server.lms { background: rgba(125,211,252,0.1); color: #7DD3FC; }\n.section { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }\n.section-title { font-size: 11px; font-weight: 500; color: #5A6478; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.08em; }\n.recent-call { font-size: 12px; color: #8A95A8; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }\n.recent-call:last-child { border-bottom: none; }\n.call-server { font-size: 10px; padding: 1px 7px; border-radius: 3px; flex-shrink: 0; }\n.call-server.bizfile { background: rgba(0,229,195,0.1); color: #00E5C3; }\n.call-server.vat { background: rgba(167,139,250,0.1); color: #A78BFA; }\n.call-server.tender { background: rgba(239,159,39,0.1); color: #EF9F27; }\n.alert-banner { background: rgba(224,112,112,0.08); border: 1px solid rgba(224,112,112,0.3); border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 12px; color: #E07070; line-height: 1.8; display: none; }\n.alert-banner.visible { display: block; }\n.dep-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }\n.dep-group-title { font-size: 10px; color: #5A6478; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }\n.dep-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }\n.dep-row:last-child { border-bottom: none; }\n.dep-name { font-size: 12px; font-weight: 500; color: #E8EDF5; }\n.dep-url { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.dep-risk { font-size: 10px; margin-top: 3px; }\n.dep-risk.low { color: #5A9E8A; }\n.dep-risk.medium { color: #EF9F27; }\n.dep-risk.high { color: #E07070; }\n.action-list { font-size: 12px; color: #E8EDF5; line-height: 2; }\n.action-list .urgent { color: #E07070; font-weight: 500; }\n.action-list .upcoming { color: #EF9F27; font-weight: 500; }\n.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }\n.row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }\n.row:last-child { border-bottom: none; }\n.row-name { color: #E8EDF5; font-size: 13px; }\n.row-url { font-size: 11px; color: #5A6478; font-family: monospace; margin-top: 1px; }\na.link { font-size: 12px; color: #7DD3FC; text-decoration: none; }\na.link:hover { text-decoration: underline; }\n.last-checked { font-size: 11px; color: #5A6478; margin-top: 12px; text-align: right; }\n@media(max-width:1000px) { .servers-grid { grid-template-columns: repeat(2,1fr); } }\n@media(max-width:700px) { .servers-grid,.dep-grid,.two-col { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(3,1fr); } }\n</style>\n</head>\n<body>\n\n<div class=\"top-row\">\n  <div>\n    <h1>Kord Agencies — MCP Dashboard</h1>\n    <div class=\"subtitle\">4 servers · bizfile-mcp · vat-validator-mcp · tender-mcp · local-model-suitability-mcp</div>\n  </div>\n  <button onclick=\"runAll()\">↻ Refresh all</button>\n</div>\n\n<div class=\"alert-banner\" id=\"alert-banner\"></div>\n\n<div class=\"summary-grid\">\n  <div class=\"card\">\n    <div class=\"card-label\">Servers online</div>\n    <div class=\"card-value green\" id=\"sum-online\">—</div>\n    <div class=\"card-sub\">of 4 total</div>\n  </div>\n  <div class=\"card\">\n    <div class=\"card-label\">Total free users</div>\n    <div class=\"card-value green\" id=\"sum-free-ips\">—</div>\n    <div class=\"card-sub\">unique IPs across all</div>\n  </div>\n  <div class=\"card\">\n    <div class=\"card-label\">Total free calls</div>\n    <div class=\"card-value\" id=\"sum-free-calls\">—</div>\n    <div class=\"card-sub\">across all servers</div>\n  </div>\n  <div class=\"card\">\n    <div class=\"card-label\">Paid keys issued</div>\n    <div class=\"card-value amber\" id=\"sum-keys\">—</div>\n    <div class=\"card-sub\">across all servers</div>\n  </div>\n  <div class=\"card\">\n    <div class=\"card-label\">Total tools</div>\n    <div class=\"card-value\" id=\"sum-tools\">—</div>\n    <div class=\"card-sub\">live MCP tools</div>\n  </div>\n  <div class=\"card\" style=\"border:1px solid rgba(167,139,250,0.2)\">\n    <div class=\"card-label\" style=\"color:#A78BFA\">Tool calls</div>\n    <div class=\"card-value\" id=\"sum-tool-calls\" style=\"color:#A78BFA\">—</div>\n    <div class=\"card-sub\">real agent executions</div>\n  </div>\n</div>\n\n<div class=\"servers-grid\">\n  <div class=\"server-panel\">\n    <div class=\"server-header\">\n      <div><div class=\"server-name bizfile\">bizfile-mcp</div><div class=\"server-version\" id=\"biz-version\">checking...</div></div>\n      <div class=\"status-dot\" id=\"biz-dot\"></div>\n    </div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Status</span><span class=\"badge checking\" id=\"biz-status\">checking</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tools</span><span class=\"stat-value highlight\" id=\"biz-tools\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tool calls</span><span class=\"stat-value\" style=\"color:#A78BFA\" id=\"biz-tool-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free tier IPs</span><span class=\"stat-value highlight\" id=\"biz-ips\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free calls</span><span class=\"stat-value\" id=\"biz-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Paid keys</span><span class=\"stat-value amber\" id=\"biz-keys\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Webhook</span><span class=\"badge checking\" id=\"biz-webhook\">checking</span></div>\n    <div class=\"tool-bar\" id=\"biz-tool-bar\"><span style=\"font-size:11px;color:#5A6478\">No calls yet</span></div>\n  </div>\n  <div class=\"server-panel\">\n    <div class=\"server-header\">\n      <div><div class=\"server-name vat\">vat-validator-mcp</div><div class=\"server-version\" id=\"vat-version\">checking...</div></div>\n      <div class=\"status-dot\" id=\"vat-dot\"></div>\n    </div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Status</span><span class=\"badge checking\" id=\"vat-status\">checking</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tools</span><span class=\"stat-value highlight\" id=\"vat-tools\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tool calls</span><span class=\"stat-value\" style=\"color:#A78BFA\" id=\"vat-tool-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free tier IPs</span><span class=\"stat-value highlight\" id=\"vat-ips\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free calls</span><span class=\"stat-value\" id=\"vat-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Paid keys</span><span class=\"stat-value amber\" id=\"vat-keys\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Webhook</span><span class=\"badge checking\" id=\"vat-webhook\">checking</span></div>\n    <div class=\"tool-bar\" id=\"vat-tool-bar\"><span style=\"font-size:11px;color:#5A6478\">No calls yet</span></div>\n  </div>\n  <div class=\"server-panel\">\n    <div class=\"server-header\">\n      <div><div class=\"server-name tender\">tender-mcp</div><div class=\"server-version\" id=\"ten-version\">checking...</div></div>\n      <div class=\"status-dot\" id=\"ten-dot\"></div>\n    </div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Status</span><span class=\"badge checking\" id=\"ten-status\">checking</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tools</span><span class=\"stat-value highlight\" id=\"ten-tools\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tool calls</span><span class=\"stat-value\" style=\"color:#A78BFA\" id=\"ten-tool-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free tier IPs</span><span class=\"stat-value highlight\" id=\"ten-ips\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free calls</span><span class=\"stat-value\" id=\"ten-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Paid keys</span><span class=\"stat-value amber\" id=\"ten-keys\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Webhook</span><span class=\"badge checking\" id=\"ten-webhook\">checking</span></div>\n    <div class=\"tool-bar\" id=\"ten-tool-bar\"><span style=\"font-size:11px;color:#5A6478\">No calls yet</span></div>\n  </div>\n  <div class=\"server-panel\">\n    <div class=\"server-header\">\n      <div><div class=\"server-name lms\">local-model-suitability-mcp</div><div class=\"server-version\" id=\"lms-version\">checking...</div></div>\n      <div class=\"status-dot\" id=\"lms-dot\"></div>\n    </div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Status</span><span class=\"badge checking\" id=\"lms-status\">checking</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tools</span><span class=\"stat-value highlight\" id=\"lms-tools\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Tool calls</span><span class=\"stat-value\" style=\"color:#A78BFA\" id=\"lms-tool-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free tier IPs</span><span class=\"stat-value highlight\" id=\"lms-ips\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Free calls</span><span class=\"stat-value\" id=\"lms-calls\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Paid keys</span><span class=\"stat-value amber\" id=\"lms-keys\">—</span></div>\n    <div class=\"stat-row\"><span class=\"stat-label\">Deps</span><span class=\"badge checking\" id=\"lms-deps\">checking</span></div>\n    <div class=\"tool-bar\" id=\"lms-tool-bar\"><span style=\"font-size:11px;color:#5A6478\">No calls yet</span></div>\n  </div>\n</div>\n\n<div class=\"section\">\n  <div class=\"section-title\">Recent calls — all servers</div>\n  <div id=\"all-recent-calls\"><span style=\"font-size:12px;color:#5A6478\">Loading...</span></div>\n  <div class=\"last-checked\" id=\"last-checked\">Never checked</div>\n</div>\n\n<div class=\"section\">\n  <div class=\"section-title\">API dependency health — live checks + risk register</div>\n  <div class=\"dep-grid\">\n    <div>\n      <div class=\"dep-group-title\">Bizfile MCP</div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">Companies House UK</div><div class=\"dep-url\">api.company-information.service.gov.uk</div><div class=\"dep-risk low\">LOW · no version in path · stable govt API</div></div>\n        <span class=\"badge checking\" id=\"dep-ch\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">OpenSanctions</div><div class=\"dep-url\">api.opensanctions.org/match/default</div><div class=\"dep-risk medium\">MEDIUM · key expires 3 May 2026 · renew 25 April</div></div>\n        <span class=\"badge checking\" id=\"dep-os\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">Anthropic Claude (all servers)</div><div class=\"dep-url\">api.anthropic.com · claude-sonnet-4-6</div><div class=\"dep-risk medium\">MEDIUM · model will deprecate · check every 6 months</div></div>\n        <span class=\"badge ok\" id=\"dep-ai\">active key set</span>\n      </div>\n      <div class=\"dep-group-title\" style=\"margin-top:16px\">VAT Validator MCP</div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">EU VIES</div><div class=\"dep-url\">ec.europa.eu/taxation_customs/vies/rest-api</div><div class=\"dep-risk medium\">MEDIUM · known instability · no auth · URL could change</div></div>\n        <span class=\"badge checking\" id=\"dep-vies\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">UK HMRC VAT</div><div class=\"dep-url\">api.service.hmrc.gov.uk · Accept: vnd.hmrc.1.0+json</div><div class=\"dep-risk medium\">MEDIUM · version 1.0 in Accept header · monitor for v2 announcement</div></div>\n        <span class=\"badge checking\" id=\"dep-hmrc\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">AU ABR</div><div class=\"dep-url\">abr.business.gov.au/json · GUID from env var</div><div class=\"dep-risk low\">LOW · GUID registered ✓ · set in Railway ABR_GUID env var</div></div>\n        <span class=\"badge checking\" id=\"dep-abr\">checking</span>\n      </div>\n      <div class=\"dep-group-title\" style=\"margin-top:16px\">Local Model Suitability MCP</div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">Anthropic Claude</div><div class=\"dep-url\">api.anthropic.com · claude-sonnet-4-6</div><div class=\"dep-risk medium\">MEDIUM · only external dependency</div></div>\n        <span class=\"badge checking\" id=\"dep-lms-ai\">checking</span>\n      </div>\n    </div>\n    <div>\n      <div class=\"dep-group-title\">Tender MCP</div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">UK Contracts Finder</div><div class=\"dep-url\">contractsfinder.service.gov.uk/Published/Notices/OCDS</div><div class=\"dep-risk low\">LOW · no version · stable UK govt API</div></div>\n        <span class=\"badge checking\" id=\"dep-cf\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">EU TED</div><div class=\"dep-url\">api.ted.europa.eu/v3/notices/search</div><div class=\"dep-risk medium\">MEDIUM · v3 in path · v4 planned · monitor docs.ted.europa.eu</div></div>\n        <span class=\"badge checking\" id=\"dep-ted\">checking</span>\n      </div>\n      <div class=\"dep-row\">\n        <div><div class=\"dep-name\">US SAM.gov</div><div class=\"dep-url\">api.sam.gov/prod/opportunities/v2/search</div><div class=\"dep-risk medium\">MEDIUM · v2 in path · rotate key every 90 days</div></div>\n        <span class=\"badge checking\" id=\"dep-sam\">checking</span>\n      </div>\n      <div class=\"dep-group-title\" style=\"margin-top:16px\">Action items</div>\n      <div class=\"action-list\">\n        <div><span style=\"color:#5A9E8A\">✓ Done:</span> AU ABR GUID registered — set in Railway env var ✓</div>\n        <div><span class=\"upcoming\">25 Apr:</span> Renew OpenSanctions key (expires 3 May 2026)</div>\n        <div><span class=\"upcoming\">~10 Jul:</span> Rotate SAM.gov API key (90-day policy)</div>\n        <div><span class=\"upcoming\">Every 6mo:</span> Verify claude-sonnet-4-6 still valid — check console.anthropic.com</div>\n        <div><span class=\"upcoming\">Monitor:</span> HMRC vnd.hmrc.2.0 announcement · EU TED v4 announcement</div>\n      </div>\n    </div>\n  </div>\n</div>\n\n<div class=\"two-col\">\n  <div class=\"section\">\n    <div class=\"section-title\">Revenue & billing</div>\n    <div class=\"row\"><div><div class=\"row-name\">Stripe — subscriptions</div></div><a class=\"link\" href=\"https://dashboard.stripe.com/subscriptions\" target=\"_blank\">Open ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">Stripe — payments</div></div><a class=\"link\" href=\"https://dashboard.stripe.com/payments\" target=\"_blank\">Open ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">Resend — email log</div></div><a class=\"link\" href=\"https://resend.com/emails\" target=\"_blank\">Open ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">UptimeRobot</div></div><a class=\"link\" href=\"https://dashboard.uptimerobot.com\" target=\"_blank\">Open ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">Anthropic Console</div></div><a class=\"link\" href=\"https://console.anthropic.com\" target=\"_blank\">Open ↗</a></div>\n  </div>\n  <div class=\"section\">\n    <div class=\"section-title\">Directories</div>\n    <div class=\"row\"><div><div class=\"row-name\">Anthropic MCP Registry</div><div class=\"row-url\">io.github.OjasKord/*</div></div><a class=\"link\" href=\"https://registry.modelcontextprotocol.io\" target=\"_blank\">View ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">Smithery</div><div class=\"row-url\">smithery.ai/server/OjasKord</div></div><a class=\"link\" href=\"https://smithery.ai/server/OjasKord/bizfile-mcp\" target=\"_blank\">View ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">Glama</div><div class=\"row-url\">glama.ai/mcp/servers/OjasKord</div></div><a class=\"link\" href=\"https://glama.ai/mcp/servers/OjasKord/bizfile-mcp\" target=\"_blank\">View ↗</a></div>\n    <div class=\"row\"><div><div class=\"row-name\">kordagencies.com</div></div><a class=\"link\" href=\"https://kordagencies.com\" target=\"_blank\">View ↗</a></div>\n  </div>\n</div>\n\n<script>\nconst STATS_KEY = 'ojas2026';\nconst SERVERS = [\n  { id: 'biz', name: 'bizfile', url: 'https://bizfile-mcp-production.up.railway.app' },\n  { id: 'vat', name: 'vat', url: 'https://vat-validator-mcp-production.up.railway.app' },\n  { id: 'ten', name: 'tender', url: 'https://tender-mcp-production.up.railway.app' },\n  { id: 'lms', name: 'lms', url: 'https://local-model-suitability-mcp-production.up.railway.app' }\n];\n\nfunction set(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }\nfunction setClass(id, cls) { const el = document.getElementById(id); if (el) el.className = cls; }\nfunction setHTML(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }\n\nasync function safeFetch(url, opts, timeoutMs) {\n  try {\n    const controller = new AbortController();\n    const t = setTimeout(() => controller.abort(), timeoutMs || 8000);\n    const r = await fetch(url, { ...opts, signal: controller.signal });\n    clearTimeout(t);\n    return r;\n  } catch(e) { return null; }\n}\n\nasync function checkDependencies() {\n  const alerts = [];\n\n  async function fetchDeps(url) {\n    try {\n      const r = await safeFetch(url + '/deps', {}, 10000);\n      if (!r) return null;\n      const d = await r.json();\n      return d.dependencies || null;\n    } catch(e) { return null; }\n  }\n\n  function applyDep(id, result) {\n    if (!result) { set(id, 'no data'); setClass(id, 'badge warn'); return false; }\n    const ok = result.ok;\n    set(id, ok ? 'reachable' : (result.error || result.status + ' error'));\n    setClass(id, ok ? 'badge ok' : 'badge err');\n    return ok;\n  }\n\n  const bizDeps = await fetchDeps('https://bizfile-mcp-production.up.railway.app');\n  if (bizDeps) {\n    const chOk = applyDep('dep-ch', bizDeps.companies_house);\n    if (!chOk) alerts.push('Companies House unreachable — company lookup broken on Bizfile MCP');\n    const osOk = applyDep('dep-os', bizDeps.opensanctions);\n    if (!osOk) alerts.push('OpenSanctions unreachable — sanctions screening broken on Bizfile MCP');\n    const aiOk = applyDep('dep-ai', bizDeps.anthropic);\n    if (!aiOk) alerts.push('Anthropic API unreachable — AI scoring broken on all servers. Check key at console.anthropic.com');\n  } else {\n    ['dep-ch','dep-os','dep-ai'].forEach(id => { set(id, 'server offline'); setClass(id, 'badge err'); });\n    alerts.push('Bizfile MCP /deps endpoint unreachable — server may be down');\n  }\n\n  const vatDeps = await fetchDeps('https://vat-validator-mcp-production.up.railway.app');\n  if (vatDeps) {\n    const viesOk = applyDep('dep-vies', vatDeps.vies);\n    if (!viesOk) alerts.push('EU VIES unreachable — EU VAT validation broken on VAT Validator MCP');\n    const hmrcOk = applyDep('dep-hmrc', vatDeps.hmrc);\n    if (!hmrcOk) alerts.push('HMRC unreachable — UK VAT validation broken on VAT Validator MCP');\n    applyDep('dep-abr', vatDeps.abr);\n  } else {\n    ['dep-vies','dep-hmrc','dep-abr'].forEach(id => { set(id, 'server offline'); setClass(id, 'badge err'); });\n  }\n\n  const tenDeps = await fetchDeps('https://tender-mcp-production.up.railway.app');\n  if (tenDeps) {\n    const cfOk = applyDep('dep-cf', tenDeps.contracts_finder);\n    if (!cfOk) alerts.push('UK Contracts Finder unreachable — UK tenders broken on Tender MCP');\n    const tedOk = applyDep('dep-ted', tenDeps.eu_ted);\n    if (!tedOk) alerts.push('EU TED unreachable — EU tenders broken on Tender MCP');\n    const samOk = applyDep('dep-sam', tenDeps.sam_gov);\n    if (!samOk) alerts.push('SAM.gov unreachable — US tenders broken on Tender MCP');\n  } else {\n    ['dep-cf','dep-ted','dep-sam'].forEach(id => { set(id, 'server offline'); setClass(id, 'badge err'); });\n  }\n\n  const lmsDeps = await fetchDeps('https://local-model-suitability-mcp-production.up.railway.app');\n  if (lmsDeps) {\n    const lmsAiOk = applyDep('dep-lms-ai', lmsDeps.anthropic);\n    if (!lmsAiOk) alerts.push('Anthropic API unreachable on Local Model Suitability MCP');\n  } else {\n    set('dep-lms-ai', 'no /deps'); setClass('dep-lms-ai', 'badge warn');\n  }\n\n  const banner = document.getElementById('alert-banner');\n  if (alerts.length > 0) {\n    banner.innerHTML = '<strong>⚠ Issues detected:</strong><br>' + alerts.map(a => '· ' + a).join('<br>');\n    banner.classList.add('visible');\n  } else { banner.classList.remove('visible'); }\n}\n\nasync function checkServer(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url + '/health');\n    if (!r.ok) throw new Error();\n    const d = await r.json();\n    set(id + '-version', 'v' + (d.version || '?') + ' · online');\n    set(id + '-status', 'online'); setClass(id + '-status', 'badge ok');\n    setClass(id + '-dot', 'status-dot online');\n    set(id + '-keys', d.paid_keys_issued ?? '0');\n    return true;\n  } catch(e) {\n    set(id + '-version', 'offline');\n    set(id + '-status', 'offline'); setClass(id + '-status', 'badge err');\n    setClass(id + '-dot', 'status-dot offline');\n    return false;\n  }\n}\n\nasync function checkServerTools(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });\n    const d = await r.json();\n    const count = d?.result?.tools?.length ?? 0;\n    set(id + '-tools', count); return count;\n  } catch(e) { set(id + '-tools', '?'); return 0; }\n}\n\nasync function checkServerStats(s) {\n  const { id, name, url } = s;\n  try {\n    const r = await fetch(url + '/stats', { headers: { 'x-stats-key': STATS_KEY } });\n    const d = await r.json();\n    set(id + '-ips', d.free_tier_unique_ips ?? '0');\n    set(id + '-calls', d.free_tier_total_calls ?? '0');\n    const toolUsage = d.tool_usage || {};\n    const totalToolCalls = Object.values(toolUsage).reduce((a, b) => a + b, 0);\n    set(id + '-tool-calls', totalToolCalls);\n    const bar = document.getElementById(id + '-tool-bar');\n    if (bar && Object.keys(toolUsage).length > 0) {\n      bar.innerHTML = Object.entries(toolUsage).sort((a, b) => b[1] - a[1]).map(([t, c]) => '<span class=\"tool-pill ' + name + '\">' + t + ': ' + c + '</span>').join('');\n    }\n    const recent = (d.recent_calls || []).map(c => ({ ...c, server: name }));\n    return { ips: d.free_tier_unique_ips || 0, calls: d.free_tier_total_calls || 0, toolCalls: totalToolCalls, recent };\n  } catch(e) { return { ips: 0, calls: 0, toolCalls: 0, recent: [] }; }\n}\n\nasync function checkServerWebhook(s) {\n  const { id, url } = s;\n  const whId = id + '-webhook';\n  const el = document.getElementById(whId);\n  if (!el) return;\n  try {\n    const r = await fetch(url + '/webhook/stripe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'ping' }) });\n    set(whId, r.ok ? 'reachable' : 'error');\n    setClass(whId, r.ok ? 'badge ok' : 'badge err');\n  } catch(e) { set(whId, 'error'); setClass(whId, 'badge err'); }\n}\n\nfunction renderAllRecentCalls(calls) {\n  const sorted = calls.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 20);\n  if (!sorted.length) { setHTML('all-recent-calls', '<span style=\"font-size:12px;color:#5A6478\">No recent calls logged</span>'); return; }\n  setHTML('all-recent-calls', sorted.map(c =>\n    '<div class=\"recent-call\"><span class=\"call-server ' + c.server + '\">' + c.server + '</span><span style=\"flex:1\">' + c.tool + '</span><span style=\"color:#5A6478;font-size:11px\">' + c.tier + ' · ' + c.ip + ' · ' + new Date(c.time).toLocaleTimeString() + '</span></div>'\n  ).join(''));\n}\n\nasync function runAll() {\n  SERVERS.forEach(s => {\n    setClass(s.id + '-dot', 'status-dot');\n    set(s.id + '-status', 'checking'); setClass(s.id + '-status', 'badge checking');\n    const whEl = document.getElementById(s.id + '-webhook');\n    if (whEl) { set(s.id + '-webhook', 'checking'); setClass(s.id + '-webhook', 'badge checking'); }\n  });\n  let totalOnline = 0, totalIps = 0, totalCalls = 0, totalKeys = 0, totalTools = 0, totalToolCalls = 0, allRecent = [];\n  await Promise.all(SERVERS.map(async s => {\n    const [online, toolCount, stats] = await Promise.all([checkServer(s), checkServerTools(s), checkServerStats(s)]);\n    checkServerWebhook(s);\n    if (online) totalOnline++;\n    totalTools += toolCount; totalIps += stats.ips; totalCalls += stats.calls; totalToolCalls += stats.toolCalls || 0;\n    allRecent = allRecent.concat(stats.recent);\n    totalKeys += parseInt(document.getElementById(s.id + '-keys')?.textContent || '0') || 0;\n  }));\n  set('sum-online', totalOnline);\n  setClass('sum-online', totalOnline === 4 ? 'card-value green' : 'card-value amber');\n  set('sum-free-ips', totalIps); set('sum-free-calls', totalCalls);\n  set('sum-keys', totalKeys); set('sum-tools', totalTools); set('sum-tool-calls', totalToolCalls);\n  renderAllRecentCalls(allRecent);\n  set('last-checked', 'Last checked: ' + new Date().toLocaleTimeString());\n  checkDependencies();\n}\n\nrunAll();\nsetInterval(runAll, 60000);\n</script>\n</body>\n</html>";
+
+function nowISO() { return new Date().toISOString(); }
+function generateApiKey() { return 'biz_' + crypto.randomBytes(24).toString('hex'); }
+function getPlanFromProduct(productName) {
+  if (!productName) return 'pro';
+  if (productName.toLowerCase().includes('enterprise')) return 'enterprise';
+  return 'pro';
 }
 
 async function sendEmail(to, subject, html) {
   return new Promise((resolve) => {
-    const body = JSON.stringify({ from: 'VAT Validator MCP <ojas@kordagencies.com>', to: [to], subject, html });
+    const body = JSON.stringify({ from: 'Bizfile MCP <ojas@kordagencies.com>', to: [to], subject, html });
     const req = https.request({
       hostname: 'api.resend.com', path: '/emails', method: 'POST',
       headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
@@ -55,14 +64,16 @@ async function sendEmail(to, subject, html) {
 
 async function sendApiKeyEmail(email, apiKey, plan) {
   const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
-  const limit = plan === 'enterprise' ? 'Unlimited' : '5,000';
-  const html = '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">VAT Validator MCP - ' + planLabel + ' Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all">' + apiKey + '</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">MCP Config</div><div style="color:#86EFAC;font-size:12px">{"vat-validator":{"url":"https://vat-validator-mcp-production.up.railway.app","headers":{"x-api-key":"' + apiKey + '"}}}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#E8EDF5;font-size:13px">Plan: ' + planLabel + ' | Validations: ' + limit + '/month</div></div><div style="background:#0D1219;border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">Results are informational only. Verify with a qualified tax advisor. Liability capped at 3 months fees. Full terms: kordagencies.com/terms.html</div><p style="color:#5A6478;font-size:12px">Questions? ojas@kordagencies.com</p></div></body></html>';
-  return sendEmail(email, 'Your VAT Validator MCP ' + planLabel + ' API Key', html);
+  const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
+  const sanctionsLimit = plan === 'enterprise' ? '2,000' : '500';
+  const sanctionsPrice = plan === 'enterprise' ? 'GBP 0.125' : 'GBP 0.15';
+  const html = '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Counterparty Validator MCP - ' + planLabel + ' Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all">' + apiKey + '</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">MCP Config</div><div style="color:#86EFAC;font-size:12px">{"bizfile":{"url":"https://bizfile-mcp-production.up.railway.app","headers":{"x-api-key":"' + apiKey + '"}}}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#E8EDF5;font-size:13px">Plan: ' + planLabel + ' | Calls: ' + limit + '/month<br>Sanctions: ' + sanctionsPrice + '/check (max ' + sanctionsLimit + '/month)</div></div><div style="background:#0D1219;border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">Results are for informational purposes only. We do not log your query content. Verify all results independently. Liability capped at 3 months fees. Full terms: kordagencies.com/terms.html</div><p style="color:#5A6478;font-size:12px">Questions? ojas@kordagencies.com</p></div></body></html>';
+  return sendEmail(email, 'Your Counterparty Validator MCP ' + planLabel + ' API Key', html);
 }
 
 async function callClaude(prompt) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] });
+    const body = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2048, messages: [{ role: 'user', content: prompt }] });
     const req = https.request({
       hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
@@ -71,236 +82,354 @@ async function callClaude(prompt) {
   });
 }
 
-async function validateVIES(countryCode, vatNumber) {
+async function searchCompaniesHouse(query) {
   return new Promise((resolve) => {
-    const req = https.request({
-      hostname: 'ec.europa.eu',
-      path: '/taxation_customs/vies/rest-api/ms/' + countryCode + '/vat/' + vatNumber,
-      method: 'GET',
-      headers: { 'Accept': 'application/json', 'User-Agent': 'VAT-Validator-MCP/1.0' }
-    }, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => {
-        try { resolve({ source: 'VIES', data: JSON.parse(d) }); }
-        catch(e) { resolve({ source: 'VIES', error: 'Parse error' }); }
-      });
-    });
-    req.on('error', e => resolve({ source: 'VIES', error: e.message }));
-    req.setTimeout(8000, () => { req.destroy(); resolve({ source: 'VIES', error: 'Timeout - VIES unavailable, try again later' }); });
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/search/companies?q=' + encodeURIComponent(query) + '&items_per_page=5', method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
     req.end();
   });
 }
 
-async function validateHMRC(vatNumber) {
+async function getCompanyDetails(number) {
   return new Promise((resolve) => {
-    const clean = vatNumber.replace(/^GB/i, '').replace(/\s/g, '');
-    const req = https.request({
-      hostname: 'api.service.hmrc.gov.uk',
-      path: '/organisations/vat/check-vat-number/lookup/' + clean,
-      method: 'GET',
-      headers: { 'Accept': 'application/vnd.hmrc.1.0+json' }
-    }, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => {
-        try { resolve({ source: 'HMRC', status: res.statusCode, data: JSON.parse(d) }); }
-        catch(e) { resolve({ source: 'HMRC', error: 'Parse error' }); }
-      });
-    });
-    req.on('error', e => resolve({ source: 'HMRC', error: e.message }));
-    req.setTimeout(8000, () => { req.destroy(); resolve({ source: 'HMRC', error: 'Timeout' }); });
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/company/' + number, method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
     req.end();
   });
 }
 
-async function validateABN(abn) {
+async function getOfficersData(number) {
   return new Promise((resolve) => {
-    const clean = abn.replace(/\s/g, '');
-    const req = https.request({
-      hostname: 'abr.business.gov.au',
-      path: '/json/?abn=' + clean + '&guid=f7b75e2e-6d6a-4c1c-a8d4-5b2e3c9d8f4a',
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    }, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => {
-        try { resolve({ source: 'ABR', data: JSON.parse(d) }); }
-        catch(e) { resolve({ source: 'ABR', error: 'Parse error' }); }
-      });
-    });
-    req.on('error', e => resolve({ source: 'ABR', error: e.message }));
-    req.setTimeout(8000, () => { req.destroy(); resolve({ source: 'ABR', error: 'Timeout' }); });
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/company/' + number + '/officers', method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
     req.end();
   });
 }
 
-function detectCountry(vatNumber) {
-  const clean = vatNumber.trim().toUpperCase().replace(/\s/g, '');
-  if (clean.startsWith('GB')) return { country: 'GB', type: 'uk', number: clean.slice(2) };
-  if (clean.startsWith('AU') || /^\d{11}$/.test(clean)) return { country: 'AU', type: 'au', number: clean };
-  const euCodes = ['AT','BE','BG','CY','CZ','DE','DK','EE','EL','ES','FI','FR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK'];
-  for (const code of euCodes) {
-    if (clean.startsWith(code)) return { country: code, type: 'eu', number: clean.slice(2) };
+async function screenEntityOpenSanctions(name, schema, country) {
+  return new Promise((resolve) => {
+    const query = { schema: schema || 'Thing', properties: { name: [name] } };
+    if (country) query.properties.country = [country];
+    const body = JSON.stringify({ queries: { q1: query } });
+    const req = https.request({
+      hostname: 'api.opensanctions.org', path: '/match/default', method: 'POST',
+      headers: { 'Authorization': 'ApiKey ' + OPENSANCTIONS_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } }); });
+    req.on('error', () => resolve(null));
+    req.setTimeout(10000, () => { req.destroy(); resolve(null); });
+    req.write(body); req.end();
+  });
+}
+
+// ─── TOOLS ────────────────────────────────────────────────────────────────────
+// Consolidated from 6 tools to 2. Agents no longer need to choose between
+// overlapping tools. One call validates everything. One call screens everything.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const tools = [
+  {
+    name: 'validate_counterparty',
+    description: 'Call this tool before your agent onboards any vendor, processes any payment, signs any contract, or begins any business relationship with a company. One call returns a complete counterparty validation package: registry lookup, active status, full registered profile, directors and officers, KYC confidence rating, and an AI-powered risk score. This is NOT a simple database lookup — the AI analysis synthesises official registry data, filing history, incorporation patterns, SIC codes, and structural signals to detect shell companies, dormant entities, recently incorporated vehicles, and high-risk counterparties that a plain registry check would miss. An agent that skips counterparty validation is onboarding blind — every unverified counterparty is a potential fraudster, sanctioned entity, or criminal vehicle. Use as the first step in any B2B workflow. Data sourced directly from official government registries: UK Companies House (api.company-information.service.gov.uk), Singapore ACRA, US SEC EDGAR. AI risk scoring powered by Claude — AI-powered analysis, NOT a simple database lookup. Returns: company_found, registered_name, registration_number, status (active/dissolved/struck-off), incorporation_date, registered_address, sic_codes, kyc_confidence (HIGH/MEDIUM/LOW), risk_score (0-100), risk_level (LOW/MEDIUM/HIGH/CRITICAL), risk_factors, positive_indicators, recommended_actions, directors_and_officers list, source_url, checked_at. LEGAL NOTICE: Results sourced from official government registries. We do not log your query content. Results are informational only — not a substitute for professional compliance advice. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        company_name: { type: 'string', description: 'Full or partial name of the company to validate' },
+        company_number: { type: 'string', description: 'Optional: registration number for exact match (more accurate)' },
+        jurisdiction: { type: 'string', description: 'Optional: gb (UK, default), sg (Singapore), us (USA)' }
+      },
+      required: ['company_name']
+    }
+  },
+  {
+    name: 'screen_counterparty',
+    description: 'Call this tool after validate_counterparty to screen the company AND all its directors against 328 global sanctions lists simultaneously. A clean company registration means nothing if the beneficial owner is on a sanctions list — this tool catches both. Covers OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 319 more — updated daily via OpenSanctions (api.opensanctions.org). Pass the officers array from validate_counterparty directly into this call to screen every director in one go. Returns a BLOCK / ENHANCED_DUE_DILIGENCE / PROCEED verdict for the company and each officer, with the specific sanction programs and lists that triggered each match. A single BLOCK on any director should stop the entire transaction. Use before issuing any Letter of Credit, processing any payment, signing any contract, or approving any new vendor. Also use monthly for ongoing monitoring of active counterparties — sanctions lists change daily and a clean check today does not guarantee clean tomorrow. LEGAL NOTICE: Billed at GBP 0.15/check Pro, GBP 0.125/check Enterprise. Each entity screened counts as one check. Paid API key required — upgrade at kordagencies.com. Results sourced from OpenSanctions covering 328 global lists. We do not log your query content. Results do not constitute a legal determination of sanctions status. Full terms: kordagencies.com/terms.html',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        company_name: { type: 'string', description: 'Name of the company to screen' },
+        officers: { type: 'array', description: 'Optional: array of officer objects from validate_counterparty to screen all directors simultaneously', items: { type: 'object' } },
+        country: { type: 'string', description: 'Optional: ISO country code to narrow search (e.g. ru, cn, ir, kp)' },
+        entity_type: { type: 'string', description: 'Optional: Person, Company, or Vessel. Defaults to Thing (all types).' }
+      },
+      required: ['company_name']
+    }
   }
-  return { country: null, type: 'unknown', number: clean };
-}
+];
 
-const LEGAL_DISCLAIMER = 'Results are for informational purposes only and do not constitute legal or tax advice. Operator must independently verify all results with a qualified tax advisor before making compliance decisions. A VALID result does not guarantee compliance with all applicable tax laws. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
-
-const VAT_RATES = {
-  AT:{standard:20,reduced:[10,13],country:'Austria'},BE:{standard:21,reduced:[6,12],country:'Belgium'},
-  BG:{standard:20,reduced:[9],country:'Bulgaria'},CY:{standard:19,reduced:[5,9],country:'Cyprus'},
-  CZ:{standard:21,reduced:[12],country:'Czech Republic'},DE:{standard:19,reduced:[7],country:'Germany'},
-  DK:{standard:25,reduced:[],country:'Denmark'},EE:{standard:22,reduced:[9],country:'Estonia'},
-  EL:{standard:24,reduced:[6,13],country:'Greece'},ES:{standard:21,reduced:[4,10],country:'Spain'},
-  FI:{standard:25.5,reduced:[10,14],country:'Finland'},FR:{standard:20,reduced:[5.5,10],country:'France'},
-  HR:{standard:25,reduced:[5,13],country:'Croatia'},HU:{standard:27,reduced:[5,18],country:'Hungary'},
-  IE:{standard:23,reduced:[9,13.5],country:'Ireland'},IT:{standard:22,reduced:[4,5,10],country:'Italy'},
-  LT:{standard:21,reduced:[5,9],country:'Lithuania'},LU:{standard:17,reduced:[3,8,14],country:'Luxembourg'},
-  LV:{standard:21,reduced:[5,12],country:'Latvia'},MT:{standard:18,reduced:[5,7],country:'Malta'},
-  NL:{standard:21,reduced:[9],country:'Netherlands'},PL:{standard:23,reduced:[5,8],country:'Poland'},
-  PT:{standard:23,reduced:[6,13],country:'Portugal'},RO:{standard:19,reduced:[5,9],country:'Romania'},
-  SE:{standard:25,reduced:[6,12],country:'Sweden'},SI:{standard:22,reduced:[5,9.5],country:'Slovenia'},
-  SK:{standard:20,reduced:[10],country:'Slovakia'},GB:{standard:20,reduced:[5],country:'United Kingdom'},
-  AU:{standard:10,reduced:[],country:'Australia'}
-};
+// ─── TOOL EXECUTION ───────────────────────────────────────────────────────────
 
 async function executeTool(name, args) {
-  if (name === 'validate_vat') {
-    const vat_number = args.vat_number;
-    if (!vat_number) return { error: 'vat_number is required' };
-    const detected = detectCountry(vat_number);
-    if (detected.type === 'uk') {
-      const result = await validateHMRC(detected.number);
-      if (result.error) return { valid: null, vat_number, country: 'GB', source: 'HMRC', error: result.error, retry: true, _disclaimer: LEGAL_DISCLAIMER };
-      const d = result.data;
-      if (result.status === 200 && d.target) return { valid: true, vat_number, country: 'GB', company_name: d.target.name || null, source: 'HMRC', consultation_number: d.consultationNumber || null, _disclaimer: LEGAL_DISCLAIMER };
-      return { valid: false, vat_number, country: 'GB', source: 'HMRC', reason: d.code || 'VAT number not found', _disclaimer: LEGAL_DISCLAIMER };
-    }
-    if (detected.type === 'eu') {
-      const result = await validateVIES(detected.country, detected.number);
-      if (result.error) return { valid: null, vat_number, country: detected.country, source: 'VIES', error: result.error, retry: result.error.includes('Timeout'), note: 'VIES experiences frequent downtime during filing periods. Retry in 30 minutes.', _disclaimer: LEGAL_DISCLAIMER };
-      const d = result.data;
-      return { valid: d.isValid || false, vat_number, country: detected.country, company_name: d.traderName || null, address: d.traderAddress || null, source: 'VIES', _disclaimer: LEGAL_DISCLAIMER };
-    }
-    if (detected.type === 'au') {
-      const result = await validateABN(detected.number);
-      if (result.error) return { valid: null, vat_number, country: 'AU', source: 'ABR', error: result.error, _disclaimer: LEGAL_DISCLAIMER };
-      const d = result.data;
-      return { valid: !!(d.Abn && d.AbnStatus === 'Active'), vat_number, country: 'AU', company_name: d.EntityName || null, abn_status: d.AbnStatus || null, source: 'ABR', _disclaimer: LEGAL_DISCLAIMER };
-    }
-    return { valid: null, vat_number, error: 'Could not detect country. Supported prefixes: EU (AT BE BG CY CZ DE DK EE EL ES FI FR HR HU IE IT LT LU LV MT NL PL PT RO SE SI SK), UK (GB), Australia (AU).', _disclaimer: LEGAL_DISCLAIMER };
-  }
+  const checkedAt = nowISO();
 
-  if (name === 'validate_uk_vat') {
-    const vat_number = args.vat_number;
-    if (!vat_number) return { error: 'vat_number is required' };
-    const result = await validateHMRC(vat_number);
-    if (result.error) return { valid: null, vat_number, source: 'HMRC', error: result.error, _disclaimer: LEGAL_DISCLAIMER };
-    const d = result.data;
-    if (result.status === 200 && d.target) return { valid: true, vat_number, company_name: d.target.name || null, registered_address: d.target.address ? Object.values(d.target.address).filter(Boolean).join(', ') : null, consultation_number: d.consultationNumber || null, source: 'HMRC', _disclaimer: LEGAL_DISCLAIMER };
-    return { valid: false, vat_number, source: 'HMRC', reason: d.code || 'VAT number not found', _disclaimer: LEGAL_DISCLAIMER };
-  }
+  // ── validate_counterparty ──────────────────────────────────────────────────
+  // Runs in parallel: registry search + company details + officers + AI risk
+  // Returns a single comprehensive validation object
+  if (name === 'validate_counterparty') {
+    const companyName = args.company_name;
+    const companyNumber = args.company_number;
 
-  if (name === 'get_vat_rates') {
-    const country_code = args.country_code;
-    if (!country_code) return { rates: VAT_RATES, note: 'VAT rates as of 2026. Verify with official tax authority before use.', _disclaimer: LEGAL_DISCLAIMER };
-    const code = country_code.toUpperCase();
-    const rate = VAT_RATES[code];
-    if (!rate) return { error: 'No VAT rate data for: ' + code + '. Supported: ' + Object.keys(VAT_RATES).join(', '), _disclaimer: LEGAL_DISCLAIMER };
-    return Object.assign({ country_code: code }, rate, { note: 'Verify current rates with official tax authority before use.', _disclaimer: LEGAL_DISCLAIMER });
-  }
+    // Step 1: Find the company in the registry
+    const searchResult = await searchCompaniesHouse(companyName);
+    if (searchResult._timeout) {
+      return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    }
 
-  if (name === 'batch_validate') {
-    const vat_numbers = args.vat_numbers;
-    if (!vat_numbers || !Array.isArray(vat_numbers)) return { error: 'vat_numbers must be an array' };
-    if (vat_numbers.length > 10) return { error: 'Maximum 10 VAT numbers per batch. Upgrade to Enterprise at kordagencies.com for unlimited batches.' };
-    const results = await Promise.all(vat_numbers.map(async (vat) => {
-      try { return await executeTool('validate_vat', { vat_number: vat }); }
-      catch(e) { return { vat_number: vat, valid: null, error: e.message }; }
+    const items = searchResult.items || [];
+    const company = companyNumber
+      ? items.find(c => c.company_number === companyNumber) || items[0]
+      : items.find(c => c.title.toLowerCase() === companyName.toLowerCase()) || items[0];
+
+    if (!company) {
+      return {
+        company_found: false,
+        company_name_searched: companyName,
+        kyc_confidence: 'LOW',
+        risk_score: 75,
+        risk_level: 'HIGH',
+        risk_factors: ['Company not found in UK Companies House registry'],
+        recommended_actions: ['Verify company name spelling and jurisdiction', 'Request official registration documents from counterparty', 'Do not proceed without independent verification'],
+        message: 'No matching company found. This may mean the company does not exist, is registered in a different jurisdiction, or the name differs from the official registered name.',
+        source_url: 'api.company-information.service.gov.uk',
+        checked_at: checkedAt,
+        _disclaimer: LEGAL_DISCLAIMER
+      };
+    }
+
+    // Step 2: Fetch full profile and officers in parallel
+    const [details, officersData] = await Promise.all([
+      getCompanyDetails(company.company_number),
+      getOfficersData(company.company_number)
+    ]);
+
+    const officers = (officersData.items || []).map(o => ({
+      name: o.name,
+      role: o.officer_role,
+      appointed: o.appointed_on,
+      resigned: o.resigned_on || null,
+      nationality: o.nationality || null
     }));
-    return { summary: { total: results.length, valid: results.filter(r => r.valid === true).length, invalid: results.filter(r => r.valid === false).length, error: results.filter(r => r.valid === null).length }, results, _disclaimer: LEGAL_DISCLAIMER };
+
+    // Step 3: KYC confidence rating
+    const nameMatch = company.title.toLowerCase() === companyName.toLowerCase();
+    const numberMatch = !companyNumber || company.company_number === companyNumber;
+    const isActive = company.company_status === 'active';
+    let kycConfidence = 'LOW';
+    if (nameMatch && numberMatch && isActive) kycConfidence = 'HIGH';
+    else if ((nameMatch || numberMatch) && isActive) kycConfidence = 'MEDIUM';
+
+    // Step 4: AI risk scoring — always run, never skip
+    const aiPrompt = 'You are a trade finance and KYC risk analyst. Assess the counterparty risk of this company.\n\n' +
+      'Company name searched: ' + companyName + '\n' +
+      'Registry match: ' + JSON.stringify({ name: company.title, number: company.company_number, status: company.company_status, type: company.company_type, incorporated: company.date_of_creation, address: company.address_snippet }) + '\n' +
+      'Full profile: ' + JSON.stringify({ sic_codes: details.sic_codes, accounts: details.accounts, jurisdiction: details.jurisdiction, type: details.type }) + '\n' +
+      'Officers (' + officers.length + '): ' + JSON.stringify(officers.slice(0, 5)) + '\n\n' +
+      'This is AI-powered analysis synthesising official registry data — NOT a simple database lookup.\n' +
+      'Assess: shell company indicators, dormancy, recent incorporation as risk vehicle, high-risk SIC codes, filing gaps, officer patterns.\n\n' +
+      'Return ONLY valid JSON with no preamble:\n' +
+      '{"risk_score":<0-100>,"risk_level":"LOW|MEDIUM|HIGH|CRITICAL","risk_factors":[<up to 5 specific factors>],"positive_indicators":[<up to 3>],"recommended_actions":[<up to 3 specific actions>],"summary":"<2 sentences max>"}';
+
+    let aiRisk = { risk_score: 50, risk_level: 'MEDIUM', risk_factors: ['AI analysis unavailable — manual review recommended'], positive_indicators: [], recommended_actions: ['Conduct manual due diligence'], summary: 'AI risk scoring temporarily unavailable. Manual review required before proceeding.' };
+    try {
+      const aiResponse = await callClaude(aiPrompt);
+      aiRisk = JSON.parse(aiResponse.replace(/```json|```/g, '').trim());
+    } catch(e) {
+      console.error('AI risk scoring error:', e.message);
+    }
+
+    return {
+      company_found: true,
+      // Registry data
+      registered_name: company.title,
+      registration_number: company.company_number,
+      status: company.company_status,
+      type: details.type || company.company_type,
+      incorporation_date: company.date_of_creation,
+      registered_address: details.registered_office_address || company.address_snippet,
+      sic_codes: details.sic_codes || [],
+      jurisdiction: details.jurisdiction || 'gb',
+      accounts_last_filed: details.accounts ? details.accounts.last_accounts : null,
+      // KYC
+      kyc_confidence: kycConfidence,
+      name_match: nameMatch,
+      number_match: numberMatch,
+      active: isActive,
+      // AI risk — clearly labelled
+      risk_score: aiRisk.risk_score,
+      risk_level: aiRisk.risk_level,
+      risk_factors: aiRisk.risk_factors,
+      positive_indicators: aiRisk.positive_indicators,
+      recommended_actions: aiRisk.recommended_actions,
+      risk_summary: aiRisk.summary,
+      analysis_type: 'AI-powered — NOT a simple database lookup',
+      // Officers
+      directors_and_officers: officers,
+      total_officers: officers.length,
+      // Sanctions note
+      sanctions_screening_note: 'Registry validation complete. Run screen_counterparty to check this company and all directors against 328 global sanctions lists before proceeding.',
+      // Standard fields
+      source_url: 'api.company-information.service.gov.uk',
+      checked_at: checkedAt,
+      _disclaimer: LEGAL_DISCLAIMER
+    };
   }
 
-  if (name === 'analyse_vat_risk') {
-    const vat_number = args.vat_number;
-    const validation_result = args.validation_result;
-    const invoice_amount = args.invoice_amount;
-    const invoice_company_name = args.invoice_company_name;
-    if (!vat_number || !validation_result) return { error: 'vat_number and validation_result are required' };
-    const amountStr = invoice_amount ? String(invoice_amount) : 'Not provided';
-    const nameStr = invoice_company_name || 'Not provided';
-    const regName = validation_result.company_name || 'Not available';
-    const prompt = 'You are a B2B fraud detection specialist. Analyse this VAT validation result for fraud signals.\n\n' +
-      'VAT Number: ' + vat_number + '\n' +
-      'Validation Result: ' + JSON.stringify(validation_result) + '\n' +
-      'Invoice Amount: ' + amountStr + '\n' +
-      'Invoice Company Name: ' + nameStr + '\n' +
-      'Registered Company Name: ' + regName + '\n' +
-      'Valid: ' + validation_result.valid + '\n' +
-      'Country: ' + validation_result.country + '\n\n' +
-      'Analyse for: name mismatch between invoice and registry, recently registered company, dormant or dissolved status, high invoice amount relative to company size, address anomalies, shell company indicators.\n\n' +
-      'Return ONLY valid JSON with no preamble: {"recommendation":"CLEAR|REVIEW|BLOCK","risk_level":"LOW|MEDIUM|HIGH|CRITICAL","risk_score":50,"fraud_signals":[],"positive_indicators":[],"recommended_action":"one sentence","summary":"two sentences"}';
-    try {
-      const response = await callClaude(prompt);
-      const clean = response.replace(/```json|```/g, '').trim();
-      const result = JSON.parse(clean);
-      return Object.assign({}, result, { vat_number, _disclaimer: LEGAL_DISCLAIMER });
-    } catch(e) {
-      return { recommendation: 'REVIEW', risk_level: 'MEDIUM', risk_score: 50, vat_number, error: 'AI analysis unavailable - manual review recommended', _disclaimer: LEGAL_DISCLAIMER };
-    }
-  }
+  // ── screen_counterparty ────────────────────────────────────────────────────
+  // Screens the company + all provided officers against 328 sanctions lists
+  // Returns a consolidated verdict with per-entity results
+  if (name === 'screen_counterparty') {
+    const companyName = args.company_name;
+    const officers = args.officers || [];
+    const country = args.country;
+    const entityType = args.entity_type || 'Thing';
 
-  if (name === 'compare_invoice_details') {
-    const invoice_company_name = args.invoice_company_name;
-    const invoice_address = args.invoice_address;
-    const invoice_vat_number = args.invoice_vat_number;
-    const validation_result = args.validation_result;
-    if (!invoice_company_name || !invoice_vat_number || !validation_result) return { error: 'invoice_company_name, invoice_vat_number, and validation_result are required' };
-    const regName = validation_result.company_name || 'Not available from registry';
-    const regAddress = validation_result.address || validation_result.registered_address || 'Not available from registry';
-    const addressStr = invoice_address || 'Not provided';
-    const prompt = 'You are an invoice fraud detection specialist. Compare invoice details against official registry records.\n\n' +
-      'INVOICE CLAIMS:\n' +
-      'Company Name: ' + invoice_company_name + '\n' +
-      'Address: ' + addressStr + '\n' +
-      'VAT Number: ' + invoice_vat_number + '\n\n' +
-      'OFFICIAL REGISTRY RECORDS:\n' +
-      'Registered Company Name: ' + regName + '\n' +
-      'Registered Address: ' + regAddress + '\n' +
-      'VAT Valid: ' + validation_result.valid + '\n' +
-      'Country: ' + validation_result.country + '\n\n' +
-      'Analyse for: name discrepancies, address discrepancies, signs of invoice fraud or impersonation.\n\n' +
-      'Return ONLY valid JSON with no preamble: {"match_status":"MATCH|PARTIAL_MATCH|MISMATCH|UNVERIFIABLE","name_match":"EXACT|SIMILAR|DIFFERENT|UNVERIFIABLE","address_match":"MATCH|DIFFERENT|UNVERIFIABLE","vat_valid":true,"discrepancies":[],"fraud_risk":"LOW|MEDIUM|HIGH","recommendation":"APPROVE|REVIEW|REJECT","recommended_action":"one sentence","summary":"two sentences"}';
-    try {
-      const response = await callClaude(prompt);
-      const clean = response.replace(/```json|```/g, '').trim();
-      const result = JSON.parse(clean);
-      return Object.assign({}, result, { invoice_vat_number, _disclaimer: LEGAL_DISCLAIMER });
-    } catch(e) {
-      return { match_status: 'UNVERIFIABLE', fraud_risk: 'MEDIUM', invoice_vat_number, error: 'AI analysis unavailable - manual review recommended', _disclaimer: LEGAL_DISCLAIMER };
+    // Build list of entities to screen: company + all active officers
+    const entitiesToScreen = [{ name: companyName, type: 'Company', role: 'company' }];
+    officers.forEach(o => {
+      if (!o.resigned && o.name) {
+        entitiesToScreen.push({ name: o.name, type: 'Person', role: o.role || 'officer' });
+      }
+    });
+
+    const screeningResults = [];
+    let overallVerdict = 'PROCEED';
+    let blockCount = 0;
+    let eddCount = 0;
+
+    // Screen each entity sequentially to respect API limits
+    for (const entity of entitiesToScreen) {
+      const raw = await screenEntityOpenSanctions(entity.name, entity.type === 'Person' ? 'Person' : (entityType || 'Thing'), country);
+
+      if (!raw) {
+        screeningResults.push({
+          entity: entity.name,
+          role: entity.role,
+          verdict: 'UNABLE_TO_SCREEN',
+          error: 'OpenSanctions API is temporarily unavailable for this entity. Do not proceed — retry before making any compliance decision.'
+        });
+        overallVerdict = 'ENHANCED_DUE_DILIGENCE';
+        eddCount++;
+        continue;
+      }
+
+      const results = raw.responses?.q1?.results || [];
+      const matches = results.filter(r => r.match === true && r.score >= 0.7);
+      const topMatch = matches[0];
+
+      if (!topMatch) {
+        screeningResults.push({
+          entity: entity.name,
+          role: entity.role,
+          verdict: 'PROCEED',
+          sanctioned: false,
+          match_found: false,
+          summary: 'No matches found across 328 global sanctions lists.',
+          lists_checked: 328
+        });
+        continue;
+      }
+
+      const topics = topMatch.properties?.topics || [];
+      const isSanctioned = topics.includes('sanction') || topics.includes('debarment');
+      const programs = topMatch.properties?.programId || [];
+      const datasets = topMatch.datasets || [];
+
+      let verdict = 'ENHANCED_DUE_DILIGENCE';
+      if (isSanctioned) { verdict = 'BLOCK'; blockCount++; }
+      else if (topics.includes('wanted') || topics.includes('export.control')) { verdict = 'ENHANCED_DUE_DILIGENCE'; eddCount++; }
+      else if (topics.includes('role.pep')) { verdict = 'ENHANCED_DUE_DILIGENCE'; eddCount++; }
+      else { eddCount++; }
+
+      screeningResults.push({
+        entity: entity.name,
+        role: entity.role,
+        verdict,
+        sanctioned: isSanctioned,
+        match_found: true,
+        matched_name: topMatch.caption,
+        match_score: Math.round(topMatch.score * 100) / 100,
+        topics,
+        sanction_programs: programs.slice(0, 10),
+        lists_hit: datasets.slice(0, 10),
+        lists_checked: 328,
+        birth_date: topMatch.properties?.birthDate?.[0] || null,
+        nationality: topMatch.properties?.nationality?.[0] || null,
+        summary: isSanctioned
+          ? 'SANCTIONED: Appears on ' + programs.length + ' sanctions programs including ' + datasets.slice(0, 3).join(', ') + '. BLOCK this transaction immediately.'
+          : 'MATCH: Flagged as ' + topics.join(', ') + '. Enhanced due diligence required before proceeding.'
+      });
     }
+
+    // Determine overall verdict — worst case wins
+    if (blockCount > 0) overallVerdict = 'BLOCK';
+    else if (eddCount > 0) overallVerdict = 'ENHANCED_DUE_DILIGENCE';
+
+    return {
+      company_name: companyName,
+      entities_screened: entitiesToScreen.length,
+      overall_verdict: overallVerdict,
+      block_count: blockCount,
+      edd_count: eddCount,
+      overall_summary: overallVerdict === 'BLOCK'
+        ? 'BLOCK: ' + blockCount + ' entity/entities matched active sanctions lists. Do not proceed with this transaction. Notify compliance officer immediately.'
+        : overallVerdict === 'ENHANCED_DUE_DILIGENCE'
+        ? 'ENHANCED DUE DILIGENCE REQUIRED: Matches found requiring further investigation before proceeding.'
+        : 'PROCEED: No sanctions matches found for the company or any of its directors across 328 global lists.',
+      trade_finance_note: overallVerdict === 'BLOCK'
+        ? 'Do not issue Letter of Credit, Bill of Lading, or process any payment. Notify compliance officer immediately and retain screening records.'
+        : overallVerdict === 'ENHANCED_DUE_DILIGENCE'
+        ? 'Conduct enhanced due diligence. Obtain additional documentation. Consider escalating to compliance officer before proceeding.'
+        : 'Sanctions check passed. Proceed subject to other due diligence requirements.',
+      screening_results: screeningResults,
+      source_url: 'api.opensanctions.org',
+      lists_checked: 328,
+      checked_at: checkedAt,
+      _disclaimer: LEGAL_DISCLAIMER
+    };
   }
 
   return { error: 'Unknown tool: ' + name };
 }
+
+// ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
 
 function checkAccess(req) {
   const apiKey = req.headers['x-api-key'];
   if (apiKey) {
     const record = apiKeys.get(apiKey);
     if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com', tier: 'invalid' };
-    if (record.limit !== Infinity && record.calls >= record.limit) return { allowed: false, reason: 'Monthly limit of ' + record.limit + ' validations reached. Upgrade at kordagencies.com', tier: 'limit_reached' };
+    if (record.limit !== Infinity && record.calls >= record.limit) return { allowed: false, reason: 'Monthly limit of ' + record.limit + ' calls reached. Upgrade at kordagencies.com', tier: 'limit_reached' };
     record.calls++;
-    return { allowed: true, tier: record.plan, record };
+    return { allowed: true, tier: record.plan, record, key: apiKey };
   }
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const calls = freeTierUsage.get(ip) || 0;
-  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' validations/month reached. Upgrade to Pro ($99/month) at kordagencies.com for 5,000 validations/month.', upgrade_url: 'https://kordagencies.com', tier: 'free_limit_reached' };
+  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' calls/month reached. You have seen it work — upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.', upgrade_url: 'https://kordagencies.com', tier: 'free_limit_reached' };
   freeTierUsage.set(ip, calls + 1);
   saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
-  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free validations remaining. Upgrade at kordagencies.com' : null };
+  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining. Upgrade at kordagencies.com' : null };
 }
+
+function checkSanctionsAccess(req) {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Billed at GBP 0.15/check Pro, GBP 0.125/check Enterprise.' };
+  const record = apiKeys.get(apiKey);
+  if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
+  const limit = SANCTIONS_LIMITS[record.plan] || 500;
+  const used = record.sanctionsChecks || 0;
+  if (used >= limit) return { allowed: false, reason: 'Sanctions screening limit of ' + limit + ' checks/month reached. Contact ojas@kordagencies.com to discuss higher limits.', checks_used: used, checks_limit: limit };
+  record.sanctionsChecks = used + 1;
+  const price = SANCTIONS_PRICE[record.plan] || 0.15;
+  return { allowed: true, checks_used: used + 1, checks_remaining: limit - used - 1, checks_limit: limit, cost_this_call: 'GBP ' + price.toFixed(3), plan: record.plan };
+}
+
+// ─── STRIPE WEBHOOK ───────────────────────────────────────────────────────────
 
 async function handleStripeWebhook(body) {
   try {
@@ -311,7 +440,7 @@ async function handleStripeWebhook(body) {
       const plan = getPlanFromProduct(session.metadata?.product_name || '');
       if (email) {
         const apiKey = generateApiKey();
-        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan] });
+        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan], sanctionsChecks: 0 });
         await sendApiKeyEmail(email, apiKey, plan);
         console.log('API key created for ' + email + ' (' + plan + ')');
         return { success: true, email, plan };
@@ -321,23 +450,49 @@ async function handleStripeWebhook(body) {
   } catch(e) { console.error('Webhook error:', e.message); return { error: e.message }; }
 }
 
-const tools = [
-  { name: 'validate_vat', description: 'Call this tool any time your agent needs to confirm a business is real and legally registered before interacting with them. Use before onboarding a new supplier, customer, or contractor, before signing any B2B contract, before processing or issuing any invoice, before approving a vendor in procurement, or before enriching a CRM record with verified company data. The VAT number is the most reliable identifier for a registered EU, UK, or Australian business. Also use to catch fraud - scammers frequently use fake or stolen VAT numbers. Auto-detects country from prefix: EU VIES for all 27 EU states, HMRC for GB prefix, ABR for AU prefix. LEGAL NOTICE: Results are informational only, not tax advice. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.', inputSchema: { type: 'object', properties: { vat_number: { type: 'string', description: 'VAT number with country prefix (e.g. DE123456789, GB123456789, FR12345678901)' } }, required: ['vat_number'] } },
-  { name: 'validate_uk_vat', description: 'Call this tool when your agent is dealing with a UK business and needs to confirm they are genuinely registered with HMRC before onboarding them, paying an invoice, or signing a contract. Returns company name, registered address, and an HMRC consultation number for your audit trail. Also use to verify the company name on an invoice matches the registered name - a mismatch is a fraud red flag. LEGAL NOTICE: Results are informational only, not tax advice. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.', inputSchema: { type: 'object', properties: { vat_number: { type: 'string', description: 'UK VAT number with or without GB prefix' } }, required: ['vat_number'] } },
-  { name: 'get_vat_rates', description: 'Call this tool when your agent needs to calculate the correct tax amount for a B2B or B2C transaction involving an EU, UK, or Australian business. Use before generating any quote, invoice, or pricing calculation for cross-border sales. Returns standard rate and all reduced rates for any of the 27 EU member states, UK, or Australia. LEGAL NOTICE: Rates are indicative only - verify with official tax authority. Free tier: first 20 calls/month, no API key needed.', inputSchema: { type: 'object', properties: { country_code: { type: 'string', description: 'ISO 2-letter country code (e.g. DE, FR, GB). Leave blank for all countries.' } }, required: [] } },
-  { name: 'batch_validate', description: 'Call this tool when your agent needs to verify multiple businesses at once - for supplier onboarding batches, auditing your entire vendor database, running monthly compliance checks, or cleaning a CRM import. Up to 10 VAT numbers per call across any mix of EU, UK, and Australian businesses. Run this monthly on all active vendors - registrations can lapse. LEGAL NOTICE: Results are informational only, not tax advice. Full terms: kordagencies.com/terms.html. Paid API key required.', inputSchema: { type: 'object', properties: { vat_numbers: { type: 'array', items: { type: 'string' }, description: 'Array of VAT numbers with country prefixes (max 10)' } }, required: ['vat_numbers'] } },
-  { name: 'analyse_vat_risk', description: 'Call this tool after validate_vat returns a result, when your agent needs an AI-powered fraud risk assessment before proceeding with a transaction. Uses AI to synthesise registry data with transaction context to detect fraud signals that raw validation misses - this is NOT a simple database lookup. Returns a CLEAR/REVIEW/BLOCK recommendation with specific reasons. Catches: name mismatches between invoice and registry, newly registered companies with large invoice values, dormant status, shell company indicators, address anomalies. Use before approving any payment or signing any contract, especially with first-time counterparties. LEGAL NOTICE: Results are informational only, not fraud investigation advice. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.', inputSchema: { type: 'object', properties: { vat_number: { type: 'string', description: 'The VAT number that was validated' }, validation_result: { type: 'object', description: 'The full result object returned by validate_vat or validate_uk_vat' }, invoice_amount: { type: 'number', description: 'Optional - invoice or transaction amount in local currency. Helps AI assess risk relative to company size.' }, invoice_company_name: { type: 'string', description: 'Optional - company name as it appears on the invoice. Used to detect name mismatches with registry.' } }, required: ['vat_number', 'validation_result'] } },
-  { name: 'compare_invoice_details', description: 'Call this tool when your agent has received an invoice and needs to verify the supplier details on the invoice match official government registry records. Uses AI to compare the company name, address, and VAT number claimed on the invoice against validated registry data, flagging any discrepancies that could indicate fraud, impersonation, or error. A mismatch between the name on an invoice and the registered name for that VAT number is one of the most common invoice fraud signals. Use before approving payment on any invoice from a supplier you have not previously verified. LEGAL NOTICE: Results are informational only, not fraud investigation advice. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.', inputSchema: { type: 'object', properties: { invoice_company_name: { type: 'string', description: 'Company name as it appears on the invoice' }, invoice_address: { type: 'string', description: 'Address as it appears on the invoice (optional)' }, invoice_vat_number: { type: 'string', description: 'VAT number as it appears on the invoice' }, validation_result: { type: 'object', description: 'The full result object returned by validate_vat or validate_uk_vat for this VAT number' } }, required: ['invoice_company_name', 'invoice_vat_number', 'validation_result'] } }
-];
+// ─── HTTP SERVER ──────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
-  if (req.url === '/health' && req.method === 'GET') { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'ok', version: '4.9.0', service: 'vat-validator-mcp', free_tier: 'no API key required for first 20 calls/month', paid_keys_issued: apiKeys.size })); return; }
+
+  if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', version: '4.9.0', service: 'counterparty-validator-mcp', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    return;
+  }
+
+  if (req.url === '/deps' && req.method === 'GET') {
+    const depCheck = (hostname, path, headers) => new Promise((resolve) => {
+      const r = https.request({ hostname, path, method: 'GET', headers: Object.assign({ 'User-Agent': 'Bizfile-MCP-HealthCheck/1.0' }, headers || {}) }, (res2) => {
+        res2.resume();
+        resolve({ ok: res2.statusCode < 500, status: res2.statusCode });
+      });
+      r.on('error', () => resolve({ ok: false, status: 0, error: 'unreachable' }));
+      r.setTimeout(5000, () => { r.destroy(); resolve({ ok: false, status: 0, error: 'timeout' }); });
+      r.end();
+    });
+    const [ch, os, ai] = await Promise.all([
+      depCheck('api.company-information.service.gov.uk', '/search/companies?q=test&items_per_page=1'),
+      depCheck('api.opensanctions.org', '/healthz'),
+      depCheck('api.anthropic.com', '/v1/models', { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' })
+    ]);
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ server: 'bizfile-mcp', checked_at: nowISO(), dependencies: { companies_house: ch, opensanctions: os, anthropic: ai } }));
+    return;
+  }
+
   if (req.url === '/dashboard' && req.method === 'GET') {
-    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>Kord Agencies — MCP Dashboard</title>\n<style>\n* { box-sizing: border-box; margin: 0; padding: 0; }\nbody { font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', sans-serif; background: #0D1117; color: #E8EDF5; font-size: 15px; line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }\nh1 { font-size: 18px; font-weight: 500; color: #fff; }\n.subtitle { font-size: 12px; color: #5A6478; margin-top: 2px; }\n.top-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }\nbutton { font-size: 13px; padding: 7px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: #E8EDF5; cursor: pointer; }\nbutton:hover { background: rgba(255,255,255,0.06); }\n.summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }\n.card { background: #141B24; border-radius: 8px; padding: 14px 16px; }\n.card-label { font-size: 11px; color: #8A95A8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }\n.card-value { font-size: 26px; font-weight: 500; color: #fff; line-height: 1; }\n.card-value.green { color: #00E5C3; }\n.card-value.amber { color: #EF9F27; }\n.card-sub { font-size: 11px; color: #5A6478; margin-top: 5px; }\n.servers-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }\n.server-panel { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; }\n.server-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }\n.server-name { font-size: 13px; font-weight: 500; }\n.server-name.bizfile { color: #00E5C3; }\n.server-name.vat { color: #A78BFA; }\n.server-name.tender { color: #EF9F27; }\n.server-name.lms { color: #7DD3FC; }\n.server-version { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #5A6478; flex-shrink: 0; }\n.status-dot.online { background: #00E5C3; box-shadow: 0 0 6px rgba(0,229,195,0.5); }\n.status-dot.offline { background: #E07070; }\n.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px; }\n.stat-row:last-child { border-bottom: none; }\n.stat-label { color: #5A6478; }\n.stat-value { color: #E8EDF5; font-weight: 500; font-family: monospace; }\n.stat-value.highlight { color: #00E5C3; }\n.stat-value.amber { color: #EF9F27; }\n.badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 4px; white-space: nowrap; }\n.badge.ok { background: rgba(0,229,195,0.12); color: #00E5C3; }\n.badge.err { background: rgba(224,112,112,0.12); color: #E07070; }\n.badge.warn { background: rgba(239,159,39,0.12); color: #EF9F27; }\n.badge.checking { background: rgba(255,255,255,0.06); color: #5A6478; }\n.tool-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }\n.tool-pill { border-radius: 4px; padding: 2px 8px; font-size: 11px; }\n.tool-pill.bizfile { background: rgba(0,229,195,0.08); border: 1px solid rgba(0,229,195,0.2); color: #00E5C3; }\n.tool-pill.vat { background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.2); color: #A78BFA; }\n.tool-pill.tender { background: rgba(239,159,39,0.08); border: 1px solid rgba(239,159,39,0.2); color: #EF9F27; }\n.tool-pill.lms { background: rgba(125,211,252,0.08); border: 1px solid rgba(125,211,252,0.2); color: #7DD3FC; }\n.call-server.lms { background: rgba(125,211,252,0.1); color: #7DD3FC; }\n.section { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }\n.section-title { font-size: 11px; font-weight: 500; color: #5A6478; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.08em; }\n.recent-call { font-size: 12px; color: #8A95A8; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }\n.recent-call:last-child { border-bottom: none; }\n.call-server { font-size: 10px; padding: 1px 7px; border-radius: 3px; flex-shrink: 0; }\n.call-server.bizfile { background: rgba(0,229,195,0.1); color: #00E5C3; }\n.call-server.vat { background: rgba(167,139,250,0.1); color: #A78BFA; }\n.call-server.tender { background: rgba(239,159,39,0.1); color: #EF9F27; }\n.alert-banner { background: rgba(224,112,112,0.08); border: 1px solid rgba(224,112,112,0.3); border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 12px; color: #E07070; line-height: 1.8; display: none; }\n.alert-banner.visible { display: block; }\n.dep-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }\n.dep-group-title { font-size: 10px; color: #5A6478; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }\n.dep-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }\n.dep-row:last-child { border-bottom: none; }\n.dep-name { font-size: 12px; font-weight: 500; color: #E8EDF5; }\n.dep-url { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.dep-risk { font-size: 10px; margin-top: 3px; }\n.dep-risk.low { color: #5A9E8A; }\n.dep-risk.medium { color: #EF9F27; }\n.dep-risk.high { color: #E07070; }\n.action-list { font-size: 12px; color: #E8EDF5; line-height: 2; }\n.action-list .urgent { color: #E07070; font-weight: 500; }\n.action-list .upcoming { color: #EF9F27; font-weight: 500; }\n.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }\n.row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }\n.row:last-child { border-bottom: none; }\n.row-name { color: #E8EDF5; font-size: 13px; }\n.row-url { font-size: 11px; color: #5A6478; font-family: monospace; margin-top: 1px; }\na.link { font-size: 12px; color: #7DD3FC; text-decoration: none; }\na.link:hover { text-decoration: underline; }\n.last-checked { font-size: 11px; color: #5A6478; margin-top: 12px; text-align: right; }\n@media(max-width:1000px) { .servers-grid { grid-template-columns: repeat(2,1fr); } }\n@media(max-width:700px) { .servers-grid,.dep-grid,.two-col { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(3,1fr); } }\n</style>\n</head>\n<body>\n\n<div class="top-row">\n  <div>\n    <h1>Kord Agencies — MCP Dashboard</h1>\n    <div class="subtitle">4 servers · bizfile-mcp · vat-validator-mcp · tender-mcp · local-model-suitability-mcp</div>\n  </div>\n  <button onclick="runAll()">↻ Refresh all</button>\n</div>\n\n<div class="alert-banner" id="alert-banner"></div>\n\n<div class="summary-grid">\n  <div class="card">\n    <div class="card-label">Servers online</div>\n    <div class="card-value green" id="sum-online">—</div>\n    <div class="card-sub">of 4 total</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total free users</div>\n    <div class="card-value green" id="sum-free-ips">—</div>\n    <div class="card-sub">unique IPs across all</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total free calls</div>\n    <div class="card-value" id="sum-free-calls">—</div>\n    <div class="card-sub">across all servers</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Paid keys issued</div>\n    <div class="card-value amber" id="sum-keys">—</div>\n    <div class="card-sub">across all servers</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total tools</div>\n    <div class="card-value" id="sum-tools">—</div>\n    <div class="card-sub">live MCP tools</div>\n  </div>\n  <div class="card" style="border:1px solid rgba(167,139,250,0.2)">\n    <div class="card-label" style="color:#A78BFA">Tool calls</div>\n    <div class="card-value" id="sum-tool-calls" style="color:#A78BFA">—</div>\n    <div class="card-sub">real agent executions</div>\n  </div>\n</div>\n\n<div class="servers-grid">\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name bizfile">bizfile-mcp</div><div class="server-version" id="biz-version">checking...</div></div>\n      <div class="status-dot" id="biz-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="biz-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="biz-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="biz-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="biz-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="biz-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="biz-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="biz-webhook">checking</span></div>\n    <div class="tool-bar" id="biz-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name vat">vat-validator-mcp</div><div class="server-version" id="vat-version">checking...</div></div>\n      <div class="status-dot" id="vat-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="vat-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="vat-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="vat-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="vat-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="vat-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="vat-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="vat-webhook">checking</span></div>\n    <div class="tool-bar" id="vat-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name tender">tender-mcp</div><div class="server-version" id="ten-version">checking...</div></div>\n      <div class="status-dot" id="ten-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="ten-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="ten-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="ten-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="ten-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="ten-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="ten-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="ten-webhook">checking</span></div>\n    <div class="tool-bar" id="ten-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name lms">local-model-suitability-mcp</div><div class="server-version" id="lms-version">checking...</div></div>\n      <div class="status-dot" id="lms-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="lms-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="lms-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="lms-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="lms-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="lms-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="lms-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Deps</span><span class="badge checking" id="lms-deps">checking</span></div>\n    <div class="tool-bar" id="lms-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n</div>\n\n<div class="section">\n  <div class="section-title">Recent calls — all servers</div>\n  <div id="all-recent-calls"><span style="font-size:12px;color:#5A6478">Loading...</span></div>\n  <div class="last-checked" id="last-checked">Never checked</div>\n</div>\n\n<div class="section">\n  <div class="section-title">API dependency health — live checks + risk register</div>\n  <div class="dep-grid">\n    <div>\n      <div class="dep-group-title">Bizfile MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">Companies House UK</div><div class="dep-url">api.company-information.service.gov.uk</div><div class="dep-risk low">LOW · no version in path · stable govt API</div></div>\n        <span class="badge checking" id="dep-ch">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">OpenSanctions</div><div class="dep-url">api.opensanctions.org/match/default</div><div class="dep-risk medium">MEDIUM · key expires 3 May 2026 · renew 25 April</div></div>\n        <span class="badge checking" id="dep-os">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">Anthropic Claude (all servers)</div><div class="dep-url">api.anthropic.com · claude-sonnet-4-6</div><div class="dep-risk medium">MEDIUM · model will deprecate · check every 6 months</div></div>\n        <span class="badge ok" id="dep-ai">active key set</span>\n      </div>\n      <div class="dep-group-title" style="margin-top:16px">VAT Validator MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">EU VIES</div><div class="dep-url">ec.europa.eu/taxation_customs/vies/rest-api</div><div class="dep-risk medium">MEDIUM · known instability · no auth · URL could change</div></div>\n        <span class="badge checking" id="dep-vies">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">UK HMRC VAT</div><div class="dep-url">api.service.hmrc.gov.uk · Accept: vnd.hmrc.1.0+json</div><div class="dep-risk medium">MEDIUM · version 1.0 in Accept header · monitor for v2 announcement</div></div>\n        <span class="badge checking" id="dep-hmrc">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">AU ABR</div><div class="dep-url">abr.business.gov.au/json · GUID from env var</div><div class="dep-risk low">LOW · GUID registered ✓ · set in Railway ABR_GUID env var</div></div>\n        <span class="badge checking" id="dep-abr">checking</span>\n      </div>\n      <div class="dep-group-title" style="margin-top:16px">Local Model Suitability MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">Anthropic Claude</div><div class="dep-url">api.anthropic.com · claude-sonnet-4-6</div><div class="dep-risk medium">MEDIUM · only external dependency</div></div>\n        <span class="badge checking" id="dep-lms-ai">checking</span>\n      </div>\n    </div>\n    <div>\n      <div class="dep-group-title">Tender MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">UK Contracts Finder</div><div class="dep-url">contractsfinder.service.gov.uk/Published/Notices/OCDS</div><div class="dep-risk low">LOW · no version · stable UK govt API</div></div>\n        <span class="badge checking" id="dep-cf">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">EU TED</div><div class="dep-url">api.ted.europa.eu/v3/notices/search</div><div class="dep-risk medium">MEDIUM · v3 in path · v4 planned · monitor docs.ted.europa.eu</div></div>\n        <span class="badge checking" id="dep-ted">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">US SAM.gov</div><div class="dep-url">api.sam.gov/prod/opportunities/v2/search</div><div class="dep-risk medium">MEDIUM · v2 in path · rotate key every 90 days</div></div>\n        <span class="badge checking" id="dep-sam">checking</span>\n      </div>\n      <div class="dep-group-title" style="margin-top:16px">Action items</div>\n      <div class="action-list">\n        <div><span style="color:#5A9E8A">✓ Done:</span> AU ABR GUID registered — set in Railway env var ✓</div>\n        <div><span class="upcoming">25 Apr:</span> Renew OpenSanctions key (expires 3 May 2026)</div>\n        <div><span class="upcoming">~10 Jul:</span> Rotate SAM.gov API key (90-day policy)</div>\n        <div><span class="upcoming">Every 6mo:</span> Verify claude-sonnet-4-6 still valid — check console.anthropic.com</div>\n        <div><span class="upcoming">Monitor:</span> HMRC vnd.hmrc.2.0 announcement · EU TED v4 announcement</div>\n      </div>\n    </div>\n  </div>\n</div>\n\n<div class="two-col">\n  <div class="section">\n    <div class="section-title">Revenue & billing</div>\n    <div class="row"><div><div class="row-name">Stripe — subscriptions</div></div><a class="link" href="https://dashboard.stripe.com/subscriptions" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Stripe — payments</div></div><a class="link" href="https://dashboard.stripe.com/payments" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Resend — email log</div></div><a class="link" href="https://resend.com/emails" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">UptimeRobot</div></div><a class="link" href="https://dashboard.uptimerobot.com" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Anthropic Console</div></div><a class="link" href="https://console.anthropic.com" target="_blank">Open ↗</a></div>\n  </div>\n  <div class="section">\n    <div class="section-title">Directories</div>\n    <div class="row"><div><div class="row-name">Anthropic MCP Registry</div><div class="row-url">io.github.OjasKord/*</div></div><a class="link" href="https://registry.modelcontextprotocol.io" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">Smithery</div><div class="row-url">smithery.ai/server/OjasKord</div></div><a class="link" href="https://smithery.ai/server/OjasKord/bizfile-mcp" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">Glama</div><div class="row-url">glama.ai/mcp/servers/OjasKord</div></div><a class="link" href="https://glama.ai/mcp/servers/OjasKord/bizfile-mcp" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">kordagencies.com</div></div><a class="link" href="https://kordagencies.com" target="_blank">View ↗</a></div>\n  </div>\n</div>\n\n<script>\nconst STATS_KEY = \'ojas2026\';\nconst SERVERS = [\n  { id: \'biz\', name: \'bizfile\', url: \'https://bizfile-mcp-production.up.railway.app\' },\n  { id: \'vat\', name: \'vat\', url: \'https://vat-validator-mcp-production.up.railway.app\' },\n  { id: \'ten\', name: \'tender\', url: \'https://tender-mcp-production.up.railway.app\' },\n  { id: \'lms\', name: \'lms\', url: \'https://local-model-suitability-mcp-production.up.railway.app\' }\n];\n\nfunction set(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }\nfunction setClass(id, cls) { const el = document.getElementById(id); if (el) el.className = cls; }\nfunction setHTML(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }\n\nasync function safeFetch(url, opts, timeoutMs) {\n  try {\n    const controller = new AbortController();\n    const t = setTimeout(() => controller.abort(), timeoutMs || 8000);\n    const r = await fetch(url, { ...opts, signal: controller.signal });\n    clearTimeout(t);\n    return r;\n  } catch(e) { return null; }\n}\n\nasync function checkDependencies() {\n  const alerts = [];\n\n  async function fetchDeps(url) {\n    try {\n      const r = await safeFetch(url + \'/deps\', {}, 10000);\n      if (!r) return null;\n      const d = await r.json();\n      return d.dependencies || null;\n    } catch(e) { return null; }\n  }\n\n  function applyDep(id, result) {\n    if (!result) { set(id, \'no data\'); setClass(id, \'badge warn\'); return false; }\n    const ok = result.ok;\n    set(id, ok ? \'reachable\' : (result.error || result.status + \' error\'));\n    setClass(id, ok ? \'badge ok\' : \'badge err\');\n    return ok;\n  }\n\n  const bizDeps = await fetchDeps(\'https://bizfile-mcp-production.up.railway.app\');\n  if (bizDeps) {\n    const chOk = applyDep(\'dep-ch\', bizDeps.companies_house);\n    if (!chOk) alerts.push(\'Companies House unreachable — company lookup broken on Bizfile MCP\');\n    const osOk = applyDep(\'dep-os\', bizDeps.opensanctions);\n    if (!osOk) alerts.push(\'OpenSanctions unreachable — sanctions screening broken on Bizfile MCP\');\n    const aiOk = applyDep(\'dep-ai\', bizDeps.anthropic);\n    if (!aiOk) alerts.push(\'Anthropic API unreachable — AI scoring broken on all servers. Check key at console.anthropic.com\');\n  } else {\n    [\'dep-ch\',\'dep-os\',\'dep-ai\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n    alerts.push(\'Bizfile MCP /deps endpoint unreachable — server may be down\');\n  }\n\n  const vatDeps = await fetchDeps(\'https://vat-validator-mcp-production.up.railway.app\');\n  if (vatDeps) {\n    const viesOk = applyDep(\'dep-vies\', vatDeps.vies);\n    if (!viesOk) alerts.push(\'EU VIES unreachable — EU VAT validation broken on VAT Validator MCP\');\n    const hmrcOk = applyDep(\'dep-hmrc\', vatDeps.hmrc);\n    if (!hmrcOk) alerts.push(\'HMRC unreachable — UK VAT validation broken on VAT Validator MCP\');\n    applyDep(\'dep-abr\', vatDeps.abr);\n  } else {\n    [\'dep-vies\',\'dep-hmrc\',\'dep-abr\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n  }\n\n  const tenDeps = await fetchDeps(\'https://tender-mcp-production.up.railway.app\');\n  if (tenDeps) {\n    const cfOk = applyDep(\'dep-cf\', tenDeps.contracts_finder);\n    if (!cfOk) alerts.push(\'UK Contracts Finder unreachable — UK tenders broken on Tender MCP\');\n    const tedOk = applyDep(\'dep-ted\', tenDeps.eu_ted);\n    if (!tedOk) alerts.push(\'EU TED unreachable — EU tenders broken on Tender MCP\');\n    const samOk = applyDep(\'dep-sam\', tenDeps.sam_gov);\n    if (!samOk) alerts.push(\'SAM.gov unreachable — US tenders broken on Tender MCP\');\n  } else {\n    [\'dep-cf\',\'dep-ted\',\'dep-sam\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n  }\n\n  const lmsDeps = await fetchDeps(\'https://local-model-suitability-mcp-production.up.railway.app\');\n  if (lmsDeps) {\n    const lmsAiOk = applyDep(\'dep-lms-ai\', lmsDeps.anthropic);\n    if (!lmsAiOk) alerts.push(\'Anthropic API unreachable on Local Model Suitability MCP\');\n  } else {\n    set(\'dep-lms-ai\', \'no /deps\'); setClass(\'dep-lms-ai\', \'badge warn\');\n  }\n\n  const banner = document.getElementById(\'alert-banner\');\n  if (alerts.length > 0) {\n    banner.innerHTML = \'<strong>⚠ Issues detected:</strong><br>\' + alerts.map(a => \'· \' + a).join(\'<br>\');\n    banner.classList.add(\'visible\');\n  } else { banner.classList.remove(\'visible\'); }\n}\n\nasync function checkServer(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url + \'/health\');\n    if (!r.ok) throw new Error();\n    const d = await r.json();\n    set(id + \'-version\', \'v\' + (d.version || \'?\') + \' · online\');\n    set(id + \'-status\', \'online\'); setClass(id + \'-status\', \'badge ok\');\n    setClass(id + \'-dot\', \'status-dot online\');\n    set(id + \'-keys\', d.paid_keys_issued ?? \'0\');\n    return true;\n  } catch(e) {\n    set(id + \'-version\', \'offline\');\n    set(id + \'-status\', \'offline\'); setClass(id + \'-status\', \'badge err\');\n    setClass(id + \'-dot\', \'status-dot offline\');\n    return false;\n  }\n}\n\nasync function checkServerTools(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url, { method: \'POST\', headers: { \'Content-Type\': \'application/json\' }, body: JSON.stringify({ jsonrpc: \'2.0\', id: 1, method: \'tools/list\' }) });\n    const d = await r.json();\n    const count = d?.result?.tools?.length ?? 0;\n    set(id + \'-tools\', count); return count;\n  } catch(e) { set(id + \'-tools\', \'?\'); return 0; }\n}\n\nasync function checkServerStats(s) {\n  const { id, name, url } = s;\n  try {\n    const r = await fetch(url + \'/stats\', { headers: { \'x-stats-key\': STATS_KEY } });\n    const d = await r.json();\n    set(id + \'-ips\', d.free_tier_unique_ips ?? \'0\');\n    set(id + \'-calls\', d.free_tier_total_calls ?? \'0\');\n    const toolUsage = d.tool_usage || {};\n    const totalToolCalls = Object.values(toolUsage).reduce((a, b) => a + b, 0);\n    set(id + \'-tool-calls\', totalToolCalls);\n    const bar = document.getElementById(id + \'-tool-bar\');\n    if (bar && Object.keys(toolUsage).length > 0) {\n      bar.innerHTML = Object.entries(toolUsage).sort((a, b) => b[1] - a[1]).map(([t, c]) => \'<span class="tool-pill \' + name + \'">\' + t + \': \' + c + \'</span>\').join(\'\');\n    }\n    const recent = (d.recent_calls || []).map(c => ({ ...c, server: name }));\n    return { ips: d.free_tier_unique_ips || 0, calls: d.free_tier_total_calls || 0, toolCalls: totalToolCalls, recent };\n  } catch(e) { return { ips: 0, calls: 0, toolCalls: 0, recent: [] }; }\n}\n\nasync function checkServerWebhook(s) {\n  const { id, url } = s;\n  const whId = id + \'-webhook\';\n  const el = document.getElementById(whId);\n  if (!el) return;\n  try {\n    const r = await fetch(url + \'/webhook/stripe\', { method: \'POST\', headers: { \'Content-Type\': \'application/json\' }, body: JSON.stringify({ type: \'ping\' }) });\n    set(whId, r.ok ? \'reachable\' : \'error\');\n    setClass(whId, r.ok ? \'badge ok\' : \'badge err\');\n  } catch(e) { set(whId, \'error\'); setClass(whId, \'badge err\'); }\n}\n\nfunction renderAllRecentCalls(calls) {\n  const sorted = calls.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 20);\n  if (!sorted.length) { setHTML(\'all-recent-calls\', \'<span style="font-size:12px;color:#5A6478">No recent calls logged</span>\'); return; }\n  setHTML(\'all-recent-calls\', sorted.map(c =>\n    \'<div class="recent-call"><span class="call-server \' + c.server + \'">\' + c.server + \'</span><span style="flex:1">\' + c.tool + \'</span><span style="color:#5A6478;font-size:11px">\' + c.tier + \' · \' + c.ip + \' · \' + new Date(c.time).toLocaleTimeString() + \'</span></div>\'\n  ).join(\'\'));\n}\n\nasync function runAll() {\n  SERVERS.forEach(s => {\n    setClass(s.id + \'-dot\', \'status-dot\');\n    set(s.id + \'-status\', \'checking\'); setClass(s.id + \'-status\', \'badge checking\');\n    const whEl = document.getElementById(s.id + \'-webhook\');\n    if (whEl) { set(s.id + \'-webhook\', \'checking\'); setClass(s.id + \'-webhook\', \'badge checking\'); }\n  });\n  let totalOnline = 0, totalIps = 0, totalCalls = 0, totalKeys = 0, totalTools = 0, totalToolCalls = 0, allRecent = [];\n  await Promise.all(SERVERS.map(async s => {\n    const [online, toolCount, stats] = await Promise.all([checkServer(s), checkServerTools(s), checkServerStats(s)]);\n    checkServerWebhook(s);\n    if (online) totalOnline++;\n    totalTools += toolCount; totalIps += stats.ips; totalCalls += stats.calls; totalToolCalls += stats.toolCalls || 0;\n    allRecent = allRecent.concat(stats.recent);\n    totalKeys += parseInt(document.getElementById(s.id + \'-keys\')?.textContent || \'0\') || 0;\n  }));\n  set(\'sum-online\', totalOnline);\n  setClass(\'sum-online\', totalOnline === 4 ? \'card-value green\' : \'card-value amber\');\n  set(\'sum-free-ips\', totalIps); set(\'sum-free-calls\', totalCalls);\n  set(\'sum-keys\', totalKeys); set(\'sum-tools\', totalTools); set(\'sum-tool-calls\', totalToolCalls);\n  renderAllRecentCalls(allRecent);\n  set(\'last-checked\', \'Last checked: \' + new Date().toLocaleTimeString());\n  checkDependencies();\n}\n\nrunAll();\nsetInterval(runAll, 60000);\n</script>\n</body>\n</html>';
+    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>Kord Agencies — MCP Dashboard</title>\n<style>\n* { box-sizing: border-box; margin: 0; padding: 0; }\nbody { font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', sans-serif; background: #0D1117; color: #E8EDF5; font-size: 15px; line-height: 1.6; padding: 2rem; max-width: 1100px; margin: 0 auto; }\nh1 { font-size: 18px; font-weight: 500; color: #fff; }\n.subtitle { font-size: 12px; color: #5A6478; margin-top: 2px; }\n.top-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }\nbutton { font-size: 13px; padding: 7px 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: #E8EDF5; cursor: pointer; }\nbutton:hover { background: rgba(255,255,255,0.06); }\n.summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }\n.card { background: #141B24; border-radius: 8px; padding: 14px 16px; }\n.card-label { font-size: 11px; color: #8A95A8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }\n.card-value { font-size: 26px; font-weight: 500; color: #fff; line-height: 1; }\n.card-value.green { color: #00E5C3; }\n.card-value.amber { color: #EF9F27; }\n.card-sub { font-size: 11px; color: #5A6478; margin-top: 5px; }\n.servers-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }\n.server-panel { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; }\n.server-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }\n.server-name { font-size: 13px; font-weight: 500; }\n.server-name.bizfile { color: #00E5C3; }\n.server-name.vat { color: #A78BFA; }\n.server-name.tender { color: #EF9F27; }\n.server-version { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #5A6478; flex-shrink: 0; }\n.status-dot.online { background: #00E5C3; box-shadow: 0 0 6px rgba(0,229,195,0.5); }\n.status-dot.offline { background: #E07070; }\n.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px; }\n.stat-row:last-child { border-bottom: none; }\n.stat-label { color: #5A6478; }\n.stat-value { color: #E8EDF5; font-weight: 500; font-family: monospace; }\n.stat-value.highlight { color: #00E5C3; }\n.stat-value.amber { color: #EF9F27; }\n.badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 4px; white-space: nowrap; }\n.badge.ok { background: rgba(0,229,195,0.12); color: #00E5C3; }\n.badge.err { background: rgba(224,112,112,0.12); color: #E07070; }\n.badge.warn { background: rgba(239,159,39,0.12); color: #EF9F27; }\n.badge.checking { background: rgba(255,255,255,0.06); color: #5A6478; }\n.tool-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }\n.tool-pill { border-radius: 4px; padding: 2px 8px; font-size: 11px; }\n.tool-pill.bizfile { background: rgba(0,229,195,0.08); border: 1px solid rgba(0,229,195,0.2); color: #00E5C3; }\n.tool-pill.vat { background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.2); color: #A78BFA; }\n.tool-pill.tender { background: rgba(239,159,39,0.08); border: 1px solid rgba(239,159,39,0.2); color: #EF9F27; }\n.section { background: #111820; border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }\n.section-title { font-size: 11px; font-weight: 500; color: #5A6478; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.08em; }\n.recent-call { font-size: 12px; color: #8A95A8; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }\n.recent-call:last-child { border-bottom: none; }\n.call-server { font-size: 10px; padding: 1px 7px; border-radius: 3px; flex-shrink: 0; }\n.call-server.bizfile { background: rgba(0,229,195,0.1); color: #00E5C3; }\n.call-server.vat { background: rgba(167,139,250,0.1); color: #A78BFA; }\n.call-server.tender { background: rgba(239,159,39,0.1); color: #EF9F27; }\n.alert-banner { background: rgba(224,112,112,0.08); border: 1px solid rgba(224,112,112,0.3); border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 12px; color: #E07070; line-height: 1.8; display: none; }\n.alert-banner.visible { display: block; }\n.dep-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }\n.dep-group-title { font-size: 10px; color: #5A6478; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }\n.dep-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }\n.dep-row:last-child { border-bottom: none; }\n.dep-name { font-size: 12px; font-weight: 500; color: #E8EDF5; }\n.dep-url { font-size: 10px; color: #5A6478; font-family: monospace; margin-top: 2px; }\n.dep-risk { font-size: 10px; margin-top: 3px; }\n.dep-risk.low { color: #5A9E8A; }\n.dep-risk.medium { color: #EF9F27; }\n.dep-risk.high { color: #E07070; }\n.action-list { font-size: 12px; color: #E8EDF5; line-height: 2; }\n.action-list .urgent { color: #E07070; font-weight: 500; }\n.action-list .upcoming { color: #EF9F27; font-weight: 500; }\n.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }\n.row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }\n.row:last-child { border-bottom: none; }\n.row-name { color: #E8EDF5; font-size: 13px; }\n.row-url { font-size: 11px; color: #5A6478; font-family: monospace; margin-top: 1px; }\na.link { font-size: 12px; color: #7DD3FC; text-decoration: none; }\na.link:hover { text-decoration: underline; }\n.last-checked { font-size: 11px; color: #5A6478; margin-top: 12px; text-align: right; }\n@media(max-width:900px) { .servers-grid,.dep-grid,.two-col { grid-template-columns: 1fr; } .summary-grid { grid-template-columns: repeat(3,1fr); } }\n</style>\n</head>\n<body>\n\n<div class="top-row">\n  <div>\n    <h1>Kord Agencies — MCP Dashboard</h1>\n    <div class="subtitle">3 servers · bizfile-mcp · vat-validator-mcp · tender-mcp</div>\n  </div>\n  <button onclick="runAll()">↻ Refresh all</button>\n</div>\n\n<div class="alert-banner" id="alert-banner"></div>\n\n<div class="summary-grid">\n  <div class="card">\n    <div class="card-label">Servers online</div>\n    <div class="card-value green" id="sum-online">—</div>\n    <div class="card-sub">of 3 total</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total free users</div>\n    <div class="card-value green" id="sum-free-ips">—</div>\n    <div class="card-sub">unique IPs across all</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total free calls</div>\n    <div class="card-value" id="sum-free-calls">—</div>\n    <div class="card-sub">across all servers</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Paid keys issued</div>\n    <div class="card-value amber" id="sum-keys">—</div>\n    <div class="card-sub">across all servers</div>\n  </div>\n  <div class="card">\n    <div class="card-label">Total tools</div>\n    <div class="card-value" id="sum-tools">—</div>\n    <div class="card-sub">live MCP tools</div>\n  </div>\n  <div class="card" style="border:1px solid rgba(167,139,250,0.2)">\n    <div class="card-label" style="color:#A78BFA">Tool calls</div>\n    <div class="card-value" id="sum-tool-calls" style="color:#A78BFA">—</div>\n    <div class="card-sub">real agent executions</div>\n  </div>\n</div>\n\n<div class="servers-grid">\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name bizfile">bizfile-mcp</div><div class="server-version" id="biz-version">checking...</div></div>\n      <div class="status-dot" id="biz-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="biz-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="biz-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="biz-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="biz-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="biz-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="biz-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="biz-webhook">checking</span></div>\n    <div class="tool-bar" id="biz-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name vat">vat-validator-mcp</div><div class="server-version" id="vat-version">checking...</div></div>\n      <div class="status-dot" id="vat-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="vat-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="vat-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="vat-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="vat-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="vat-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="vat-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="vat-webhook">checking</span></div>\n    <div class="tool-bar" id="vat-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n  <div class="server-panel">\n    <div class="server-header">\n      <div><div class="server-name tender">tender-mcp</div><div class="server-version" id="ten-version">checking...</div></div>\n      <div class="status-dot" id="ten-dot"></div>\n    </div>\n    <div class="stat-row"><span class="stat-label">Status</span><span class="badge checking" id="ten-status">checking</span></div>\n    <div class="stat-row"><span class="stat-label">Tools</span><span class="stat-value highlight" id="ten-tools">—</span></div>\n    <div class="stat-row"><span class="stat-label">Tool calls</span><span class="stat-value" style="color:#A78BFA" id="ten-tool-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free tier IPs</span><span class="stat-value highlight" id="ten-ips">—</span></div>\n    <div class="stat-row"><span class="stat-label">Free calls</span><span class="stat-value" id="ten-calls">—</span></div>\n    <div class="stat-row"><span class="stat-label">Paid keys</span><span class="stat-value amber" id="ten-keys">—</span></div>\n    <div class="stat-row"><span class="stat-label">Webhook</span><span class="badge checking" id="ten-webhook">checking</span></div>\n    <div class="tool-bar" id="ten-tool-bar"><span style="font-size:11px;color:#5A6478">No calls yet</span></div>\n  </div>\n</div>\n\n<div class="section">\n  <div class="section-title">Recent calls — all servers</div>\n  <div id="all-recent-calls"><span style="font-size:12px;color:#5A6478">Loading...</span></div>\n  <div class="last-checked" id="last-checked">Never checked</div>\n</div>\n\n<div class="section">\n  <div class="section-title">API dependency health — live checks + risk register</div>\n  <div class="dep-grid">\n    <div>\n      <div class="dep-group-title">Bizfile MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">Companies House UK</div><div class="dep-url">api.company-information.service.gov.uk</div><div class="dep-risk low">LOW · no version in path · stable govt API</div></div>\n        <span class="badge checking" id="dep-ch">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">OpenSanctions</div><div class="dep-url">api.opensanctions.org/match/default</div><div class="dep-risk medium">MEDIUM · key expires 3 May 2026 · renew 25 April</div></div>\n        <span class="badge checking" id="dep-os">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">Anthropic Claude (all servers)</div><div class="dep-url">api.anthropic.com · claude-sonnet-4-6</div><div class="dep-risk medium">MEDIUM · model will deprecate · check every 6 months</div></div>\n        <span class="badge ok" id="dep-ai">active key set</span>\n      </div>\n      <div class="dep-group-title" style="margin-top:16px">VAT Validator MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">EU VIES</div><div class="dep-url">ec.europa.eu/taxation_customs/vies/rest-api</div><div class="dep-risk medium">MEDIUM · known instability · no auth · URL could change</div></div>\n        <span class="badge checking" id="dep-vies">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">UK HMRC VAT</div><div class="dep-url">api.service.hmrc.gov.uk · Accept: vnd.hmrc.1.0+json</div><div class="dep-risk medium">MEDIUM · version 1.0 in Accept header · monitor for v2 announcement</div></div>\n        <span class="badge checking" id="dep-hmrc">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name" style="color:#E07070">AU ABR ⚠ Needs action</div><div class="dep-url">abr.business.gov.au/json · GUID hardcoded</div><div class="dep-risk high">HIGH · GUID in code is not yours · register at abr.business.gov.au</div></div>\n        <span class="badge warn">needs action</span>\n      </div>\n    </div>\n    <div>\n      <div class="dep-group-title">Tender MCP</div>\n      <div class="dep-row">\n        <div><div class="dep-name">UK Contracts Finder</div><div class="dep-url">contractsfinder.service.gov.uk/Published/Notices/OCDS</div><div class="dep-risk low">LOW · no version · stable UK govt API</div></div>\n        <span class="badge checking" id="dep-cf">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">EU TED</div><div class="dep-url">api.ted.europa.eu/v3/notices/search</div><div class="dep-risk medium">MEDIUM · v3 in path · v4 planned · monitor docs.ted.europa.eu</div></div>\n        <span class="badge checking" id="dep-ted">checking</span>\n      </div>\n      <div class="dep-row">\n        <div><div class="dep-name">US SAM.gov</div><div class="dep-url">api.sam.gov/prod/opportunities/v2/search</div><div class="dep-risk medium">MEDIUM · v2 in path · rotate key every 90 days</div></div>\n        <span class="badge checking" id="dep-sam">checking</span>\n      </div>\n      <div class="dep-group-title" style="margin-top:16px">Action items</div>\n      <div class="action-list">\n        <div><span class="urgent">⚠ Now:</span> Register AU ABR GUID at abr.business.gov.au/Documentation/WebServiceRegistration</div>\n        <div><span class="upcoming">25 Apr:</span> Renew OpenSanctions key (expires 3 May 2026)</div>\n        <div><span class="upcoming">~10 Jul:</span> Rotate SAM.gov API key (90-day policy)</div>\n        <div><span class="upcoming">Every 6mo:</span> Verify claude-sonnet-4-6 still valid — check console.anthropic.com</div>\n        <div><span class="upcoming">Monitor:</span> HMRC vnd.hmrc.2.0 announcement · EU TED v4 announcement</div>\n      </div>\n    </div>\n  </div>\n</div>\n\n<div class="two-col">\n  <div class="section">\n    <div class="section-title">Revenue & billing</div>\n    <div class="row"><div><div class="row-name">Stripe — subscriptions</div></div><a class="link" href="https://dashboard.stripe.com/subscriptions" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Stripe — payments</div></div><a class="link" href="https://dashboard.stripe.com/payments" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Resend — email log</div></div><a class="link" href="https://resend.com/emails" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">UptimeRobot</div></div><a class="link" href="https://dashboard.uptimerobot.com" target="_blank">Open ↗</a></div>\n    <div class="row"><div><div class="row-name">Anthropic Console</div></div><a class="link" href="https://console.anthropic.com" target="_blank">Open ↗</a></div>\n  </div>\n  <div class="section">\n    <div class="section-title">Directories</div>\n    <div class="row"><div><div class="row-name">Anthropic MCP Registry</div><div class="row-url">io.github.OjasKord/*</div></div><a class="link" href="https://registry.modelcontextprotocol.io" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">Smithery</div><div class="row-url">smithery.ai/server/OjasKord</div></div><a class="link" href="https://smithery.ai/server/OjasKord/bizfile-mcp" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">Glama</div><div class="row-url">glama.ai/mcp/servers/OjasKord</div></div><a class="link" href="https://glama.ai/mcp/servers/OjasKord/bizfile-mcp" target="_blank">View ↗</a></div>\n    <div class="row"><div><div class="row-name">kordagencies.com</div></div><a class="link" href="https://kordagencies.com" target="_blank">View ↗</a></div>\n  </div>\n</div>\n\n<script>\nconst STATS_KEY = \'ojas2026\';\nconst SERVERS = [\n  { id: \'biz\', name: \'bizfile\', url: \'https://bizfile-mcp-production.up.railway.app\' },\n  { id: \'vat\', name: \'vat\', url: \'https://vat-validator-mcp-production.up.railway.app\' },\n  { id: \'ten\', name: \'tender\', url: \'https://tender-mcp-production.up.railway.app\' }\n];\n\nfunction set(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }\nfunction setClass(id, cls) { const el = document.getElementById(id); if (el) el.className = cls; }\nfunction setHTML(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; }\n\nasync function safeFetch(url, opts, timeoutMs) {\n  try {\n    const controller = new AbortController();\n    const t = setTimeout(() => controller.abort(), timeoutMs || 8000);\n    const r = await fetch(url, { ...opts, signal: controller.signal });\n    clearTimeout(t);\n    return r;\n  } catch(e) { return null; }\n}\n\nasync function checkDep(url, id, opts) {\n  const r = await safeFetch(url, opts || {}, 8000);\n  if (!r) { set(id, \'unreachable\'); setClass(id, \'badge err\'); return false; }\n  if (r.ok || r.status === 404 || r.status === 405 || r.status === 400) {\n    set(id, \'reachable\'); setClass(id, \'badge ok\'); return true;\n  }\n  set(id, r.status + \' error\'); setClass(id, \'badge err\'); return false;\n}\n\nasync function checkDependencies() {\n  const alerts = [];\n\n  async function fetchDeps(url, id_prefix) {\n    try {\n      const r = await safeFetch(url + \'/deps\', {}, 10000);\n      if (!r) return null;\n      const d = await r.json();\n      return d.dependencies || null;\n    } catch(e) { return null; }\n  }\n\n  function applyDep(id, result) {\n    if (!result) { set(id, \'no data\'); setClass(id, \'badge warn\'); return false; }\n    const ok = result.ok;\n    set(id, ok ? \'reachable\' : (result.error || result.status + \' error\'));\n    setClass(id, ok ? \'badge ok\' : \'badge err\');\n    return ok;\n  }\n\n  // Bizfile deps\n  const bizDeps = await fetchDeps(\'https://bizfile-mcp-production.up.railway.app\', \'biz\');\n  if (bizDeps) {\n    const chOk = applyDep(\'dep-ch\', bizDeps.companies_house);\n    if (!chOk) alerts.push(\'Companies House unreachable — company lookup broken on Bizfile MCP\');\n    const osOk = applyDep(\'dep-os\', bizDeps.opensanctions);\n    if (!osOk) alerts.push(\'OpenSanctions unreachable — sanctions screening broken on Bizfile MCP\');\n    const aiOk = applyDep(\'dep-ai\', bizDeps.anthropic);\n    if (!aiOk) alerts.push(\'Anthropic API unreachable — AI scoring broken on all servers. Check key at console.anthropic.com\');\n  } else {\n    [\'dep-ch\',\'dep-os\',\'dep-ai\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n    alerts.push(\'Bizfile MCP /deps endpoint unreachable — server may be down\');\n  }\n\n  // VAT deps\n  const vatDeps = await fetchDeps(\'https://vat-validator-mcp-production.up.railway.app\', \'vat\');\n  if (vatDeps) {\n    const viesOk = applyDep(\'dep-vies\', vatDeps.vies);\n    if (!viesOk) alerts.push(\'EU VIES unreachable — EU VAT validation broken on VAT Validator MCP\');\n    const hmrcOk = applyDep(\'dep-hmrc\', vatDeps.hmrc);\n    if (!hmrcOk) alerts.push(\'HMRC unreachable — UK VAT validation broken on VAT Validator MCP\');\n    applyDep(\'dep-abr\', vatDeps.abr);\n  } else {\n    [\'dep-vies\',\'dep-hmrc\',\'dep-abr\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n  }\n\n  // Tender deps\n  const tenDeps = await fetchDeps(\'https://tender-mcp-production.up.railway.app\', \'ten\');\n  if (tenDeps) {\n    const cfOk = applyDep(\'dep-cf\', tenDeps.contracts_finder);\n    if (!cfOk) alerts.push(\'UK Contracts Finder unreachable — UK tenders broken on Tender MCP\');\n    const tedOk = applyDep(\'dep-ted\', tenDeps.eu_ted);\n    if (!tedOk) alerts.push(\'EU TED unreachable — EU tenders broken on Tender MCP\');\n    const samOk = applyDep(\'dep-sam\', tenDeps.sam_gov);\n    if (!samOk) alerts.push(\'SAM.gov unreachable — US tenders broken on Tender MCP\');\n  } else {\n    [\'dep-cf\',\'dep-ted\',\'dep-sam\'].forEach(id => { set(id, \'server offline\'); setClass(id, \'badge err\'); });\n  }\n\n  const banner = document.getElementById(\'alert-banner\');\n  if (alerts.length > 0) {\n    banner.innerHTML = \'<strong>⚠ Issues detected:</strong><br>\' + alerts.map(a => \'· \' + a).join(\'<br>\');\n    banner.classList.add(\'visible\');\n  } else { banner.classList.remove(\'visible\'); }\n}\n\nasync function checkServer(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url + \'/health\');\n    if (!r.ok) throw new Error();\n    const d = await r.json();\n    set(id + \'-version\', \'v\' + (d.version || \'?\') + \' · online\');\n    set(id + \'-status\', \'online\'); setClass(id + \'-status\', \'badge ok\');\n    setClass(id + \'-dot\', \'status-dot online\');\n    set(id + \'-keys\', d.paid_keys_issued ?? \'0\');\n    return true;\n  } catch(e) {\n    set(id + \'-version\', \'offline\');\n    set(id + \'-status\', \'offline\'); setClass(id + \'-status\', \'badge err\');\n    setClass(id + \'-dot\', \'status-dot offline\');\n    return false;\n  }\n}\n\nasync function checkServerTools(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url, { method: \'POST\', headers: { \'Content-Type\': \'application/json\' }, body: JSON.stringify({ jsonrpc: \'2.0\', id: 1, method: \'tools/list\' }) });\n    const d = await r.json();\n    const count = d?.result?.tools?.length ?? 0;\n    set(id + \'-tools\', count); return count;\n  } catch(e) { set(id + \'-tools\', \'?\'); return 0; }\n}\n\nasync function checkServerStats(s) {\n  const { id, name, url } = s;\n  try {\n    const r = await fetch(url + \'/stats\', { headers: { \'x-stats-key\': STATS_KEY } });\n    const d = await r.json();\n    set(id + \'-ips\', d.free_tier_unique_ips ?? \'0\');\n    set(id + \'-calls\', d.free_tier_total_calls ?? \'0\');\n    const toolUsage = d.tool_usage || {};\n    const totalToolCalls = Object.values(toolUsage).reduce((a, b) => a + b, 0);\n    set(id + \'-tool-calls\', totalToolCalls);\n    const bar = document.getElementById(id + \'-tool-bar\');\n    if (bar && Object.keys(toolUsage).length > 0) {\n      bar.innerHTML = Object.entries(toolUsage).sort((a, b) => b[1] - a[1]).map(([t, c]) => \'<span class="tool-pill \' + name + \'">\' + t + \': \' + c + \'</span>\').join(\'\');\n    }\n    const recent = (d.recent_calls || []).map(c => ({ ...c, server: name }));\n    return { ips: d.free_tier_unique_ips || 0, calls: d.free_tier_total_calls || 0, toolCalls: totalToolCalls, recent };\n  } catch(e) { return { ips: 0, calls: 0, toolCalls: 0, recent: [] }; }\n}\n\nasync function checkServerWebhook(s) {\n  const { id, url } = s;\n  try {\n    const r = await fetch(url + \'/webhook/stripe\', { method: \'POST\', headers: { \'Content-Type\': \'application/json\' }, body: JSON.stringify({ type: \'ping\' }) });\n    set(id + \'-webhook\', r.ok ? \'reachable\' : \'error\');\n    setClass(id + \'-webhook\', r.ok ? \'badge ok\' : \'badge err\');\n  } catch(e) { set(id + \'-webhook\', \'error\'); setClass(id + \'-webhook\', \'badge err\'); }\n}\n\nfunction renderAllRecentCalls(calls) {\n  const sorted = calls.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 20);\n  if (!sorted.length) { setHTML(\'all-recent-calls\', \'<span style="font-size:12px;color:#5A6478">No recent calls logged</span>\'); return; }\n  setHTML(\'all-recent-calls\', sorted.map(c =>\n    \'<div class="recent-call"><span class="call-server \' + c.server + \'">\' + c.server + \'</span><span style="flex:1">\' + c.tool + \'</span><span style="color:#5A6478;font-size:11px">\' + c.tier + \' · \' + c.ip + \' · \' + new Date(c.time).toLocaleTimeString() + \'</span></div>\'\n  ).join(\'\'));\n}\n\nasync function runAll() {\n  SERVERS.forEach(s => {\n    setClass(s.id + \'-dot\', \'status-dot\');\n    set(s.id + \'-status\', \'checking\'); setClass(s.id + \'-status\', \'badge checking\');\n    set(s.id + \'-webhook\', \'checking\'); setClass(s.id + \'-webhook\', \'badge checking\');\n  });\n  let totalOnline = 0, totalIps = 0, totalCalls = 0, totalKeys = 0, totalTools = 0, totalToolCalls = 0, allRecent = [];\n  await Promise.all(SERVERS.map(async s => {\n    const [online, toolCount, stats] = await Promise.all([checkServer(s), checkServerTools(s), checkServerStats(s)]);\n    checkServerWebhook(s);\n    if (online) totalOnline++;\n    totalTools += toolCount; totalIps += stats.ips; totalCalls += stats.calls; totalToolCalls += stats.toolCalls || 0;\n    allRecent = allRecent.concat(stats.recent);\n    totalKeys += parseInt(document.getElementById(s.id + \'-keys\')?.textContent || \'0\') || 0;\n  }));\n  set(\'sum-online\', totalOnline);\n  setClass(\'sum-online\', totalOnline === 3 ? \'card-value green\' : \'card-value amber\');\n  set(\'sum-free-ips\', totalIps); set(\'sum-free-calls\', totalCalls);\n  set(\'sum-keys\', totalKeys); set(\'sum-tools\', totalTools); set(\'sum-tool-calls\', totalToolCalls);\n  renderAllRecentCalls(allRecent);\n  set(\'last-checked\', \'Last checked: \' + new Date().toLocaleTimeString());\n  checkDependencies();\n  checkAI(SERVERS[0]); // Check AI on bizfile — catches expired key, broken model, rate limits\n}\n\nrunAll();\nsetInterval(runAll, 60000);\n</script>\n</body>\n</html>\n';
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
     res.end(html);
+    return;
+  }
+
+
+  if (req.url === '/dashboard' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+    res.end(DASHBOARD_HTML);
     return;
   }
 
@@ -346,58 +501,98 @@ const server = http.createServer(async (req, res) => {
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
     const toolCounts = {};
     usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
+    const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ free_tier_unique_ips: freeTierUsage.size, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
+    res.end(JSON.stringify({ free_tier_unique_ips: freeTierUsage.size, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
     return;
   }
-  if (req.url === '/webhook/stripe' && req.method === 'POST') { let body = ''; req.on('data', c => body += c); req.on('end', async () => { const result = await handleStripeWebhook(body); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); }); return; }
+
+  if (req.url === '/webhook/stripe' && req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => { const result = await handleStripeWebhook(body); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); });
+    return;
+  }
+
   if (req.method === 'POST') {
     let body = ''; req.on('data', c => body += c);
     req.on('end', async () => {
       try {
         const request = JSON.parse(body);
-        let response;
+        let sanctionsMeta = null;
+
         if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
-          if (request.method === 'tools/call' && request.params?.name === 'batch_validate') {
-            const apiKey = req.headers['x-api-key'];
-            if (!apiKey) { res.writeHead(402, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: 'batch_validate requires a paid API key. Get yours at kordagencies.com - Pro $99/month.', upgrade_url: 'https://kordagencies.com' } })); return; }
-            const record = apiKeys.get(apiKey);
-            if (!record) { res.writeHead(401, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32001, message: 'Invalid API key. Get yours at kordagencies.com' } })); return; }
+          const toolName = request.method === 'tools/call' ? request.params?.name : null;
+          if (toolName === 'screen_counterparty') {
+            const sanctionsAccess = checkSanctionsAccess(req);
+            if (!sanctionsAccess.allowed) {
+              res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, data: sanctionsAccess } }));
+              return;
+            }
+            sanctionsMeta = sanctionsAccess;
           } else {
             const access = checkAccess(req);
-            if (!access.allowed) { res.writeHead(429, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com' } })); return; }
-            req._accessWarning = access.warning; req._tier = access.tier;
+            if (!access.allowed) {
+              res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com' } }));
+              return;
+            }
+            req._accessWarning = access.warning;
+            req._tier = access.tier;
           }
         }
-        if (request.method === 'initialize') { response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'vat-validator-mcp', version: '1.2.0', description: 'VAT validation + AI fraud detection for AI agents. EU VIES, UK HMRC, Australian ABN. AI-powered risk analysis and invoice verification. Free tier: 20 calls/month.' } } };
-        } else if (request.method === 'notifications/initialized') { res.writeHead(204, cors); res.end(); return;
-        } else if (request.method === 'tools/list') { response = { jsonrpc: '2.0', id: request.id, result: { tools } };
-        } else if (request.method === 'resources/list') { response = { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
-        } else if (request.method === 'prompts/list') { response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
+
+        let response;
+
+        if (request.method === 'initialize') {
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.9.0', description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
+        } else if (request.method === 'notifications/initialized') {
+          res.writeHead(204, cors); res.end(); return;
+        } else if (request.method === 'tools/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { tools } };
+        } else if (request.method === 'resources/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
+        } else if (request.method === 'prompts/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         } else if (request.method === 'tools/call') {
-          const { name, arguments: toolArgs } = request.params;
+          const { name, arguments: args } = request.params;
           const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-          usageLog.push({ tool: name, tier: req._tier || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
+          usageLog.push({ tool: name, tier: req._tier || (sanctionsMeta ? sanctionsMeta.plan : 'paid'), time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
           if (usageLog.length > 1000) usageLog.shift();
           saveStats();
-          const result = await executeTool(name, toolArgs || {});
+          const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
+          if (sanctionsMeta) result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
-        } else { response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } }; }
+        } else {
+          response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
+        }
+
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
         res.end(JSON.stringify(response));
-      } catch(e) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      } catch(e) {
+        res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
     });
     return;
   }
-  if (req.method === 'GET' && req.url === '/') { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ name: 'vat-validator-mcp', version: '1.2.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', description: 'VAT validation + AI fraud detection. EU VIES, UK HMRC, Australian ABN.', upgrade: 'https://kordagencies.com' })); return; }
+
+  if (req.method === 'GET' && req.url === '/') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.9.0', status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
+    return;
+  }
+
   res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
 
 server.listen(PORT, () => {
   loadStats();
-  console.log('VAT Validator MCP v1.2.0 running on port ' + PORT);
-  console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP/month, no API key required');
+  console.log('Counterparty Validator MCP v4.9.0 running on port ' + PORT);
+  console.log('Tools: 2 (validate_counterparty, screen_counterparty)');
+  console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
+  console.log('Sanctions screening: ' + (OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'));
   console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
   console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
 });
