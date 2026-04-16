@@ -1,0 +1,409 @@
+const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
+const fs = require('fs');
+
+const PERSIST_FILE = '/tmp/bizfile_stats.json';
+
+function saveStats() {
+  try {
+    const data = { freeTierUsage: Array.from(freeTierUsage.entries()), usageLog: usageLog.slice(-1000) };
+    fs.writeFileSync(PERSIST_FILE, JSON.stringify(data));
+  } catch(e) { console.error('Stats save error:', e.message); }
+}
+
+function loadStats() {
+  try {
+    if (fs.existsSync(PERSIST_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PERSIST_FILE, 'utf8'));
+      if (data.freeTierUsage) data.freeTierUsage.forEach(([k, v]) => freeTierUsage.set(k, v));
+      if (data.usageLog) usageLog.push(...data.usageLog);
+      console.log('Stats loaded: ' + freeTierUsage.size + ' IPs, ' + usageLog.length + ' calls');
+    }
+  } catch(e) { console.error('Stats load error:', e.message); }
+}
+
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
+const PORT = process.env.PORT || 3000;
+const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
+
+const freeTierUsage = new Map();
+const usageLog = [];
+const FREE_TIER_LIMIT = 20;
+const apiKeys = new Map();
+const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
+const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
+const SANCTIONS_PRICE = { pro: 0.15, enterprise: 0.125 };
+
+const LEGAL_DISCLAIMER = 'Results are sourced directly from official government registries and sanctions databases. We do not log or store your query content. Results are for informational purposes only and do not constitute a legal determination of company status or sanctions clearance. Operator must independently verify all results before making compliance decisions. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
+
+function nowISO() { return new Date().toISOString(); }
+function generateApiKey() { return 'biz_' + crypto.randomBytes(24).toString('hex'); }
+function getPlanFromProduct(productName) {
+  if (!productName) return 'pro';
+  if (productName.toLowerCase().includes('enterprise')) return 'enterprise';
+  return 'pro';
+}
+
+async function sendEmail(to, subject, html) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ from: 'Bizfile MCP <ojas@kordagencies.com>', to: [to], subject, html });
+    const req = https.request({
+      hostname: 'api.resend.com', path: '/emails', method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })); });
+    req.on('error', e => resolve({ error: e.message }));
+    req.write(body); req.end();
+  });
+}
+
+async function sendApiKeyEmail(email, apiKey, plan) {
+  const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
+  const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
+  const sanctionsLimit = plan === 'enterprise' ? '2,000' : '500';
+  const sanctionsPrice = plan === 'enterprise' ? 'GBP 0.125' : 'GBP 0.15';
+  const html = '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP - ' + planLabel + ' Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all">' + apiKey + '</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">MCP Config</div><div style="color:#86EFAC;font-size:12px">{"bizfile":{"url":"https://bizfile-mcp-production.up.railway.app","headers":{"x-api-key":"' + apiKey + '"}}}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#E8EDF5;font-size:13px">Plan: ' + planLabel + ' | Calls: ' + limit + '/month<br>Sanctions: ' + sanctionsPrice + '/check (max ' + sanctionsLimit + '/month)</div></div><div style="background:#0D1219;border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">Results are for informational purposes only. We do not log your query content. Verify all results independently. Liability capped at 3 months fees. Full terms: kordagencies.com/terms.html</div><p style="color:#5A6478;font-size:12px">Questions? ojas@kordagencies.com</p></div></body></html>';
+  return sendEmail(email, 'Your Bizfile MCP ' + planLabel + ' API Key', html);
+}
+
+async function callClaude(prompt) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [{ role: 'user', content: prompt }] });
+    const req = https.request({
+      hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d).content?.[0]?.text || ''); } catch(e) { reject(e); } }); });
+    req.on('error', reject); req.write(body); req.end();
+  });
+}
+
+async function searchCompaniesHouse(query) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/search/companies?q=' + encodeURIComponent(query) + '&items_per_page=5', method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
+    req.end();
+  });
+}
+
+async function getCompanyDetails(number) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/company/' + number, method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
+    req.end();
+  });
+}
+
+async function getOfficersData(number) {
+  return new Promise((resolve) => {
+    const auth = Buffer.from(COMPANIES_HOUSE_API_KEY + ':').toString('base64');
+    const req = https.request({ hostname: 'api.company-information.service.gov.uk', path: '/company/' + number + '/officers', method: 'GET', headers: { 'Authorization': 'Basic ' + auth } }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve({}); } }); });
+    req.on('error', () => resolve({}));
+    req.setTimeout(8000, () => { req.destroy(); resolve({ _timeout: true }); });
+    req.end();
+  });
+}
+
+async function screenEntityOpenSanctions(name, schema, country) {
+  return new Promise((resolve) => {
+    const query = { schema: schema || 'Thing', properties: { name: [name] } };
+    if (country) query.properties.country = [country];
+    const body = JSON.stringify({ queries: { q1: query } });
+    const req = https.request({
+      hostname: 'api.opensanctions.org', path: '/match/default', method: 'POST',
+      headers: { 'Authorization': 'ApiKey ' + OPENSANCTIONS_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } }); });
+    req.on('error', () => resolve(null));
+    req.setTimeout(10000, () => { req.destroy(); resolve(null); });
+    req.write(body); req.end();
+  });
+}
+
+const tools = [
+  {
+    name: 'search_company',
+    description: 'Call this tool any time your agent needs to find a company by name before doing business with them, verifying a counterparty, onboarding a supplier, or checking if a company exists in official government records. Use before any B2B transaction, contract, or payment to an unfamiliar company. Searches UK Companies House (api.company-information.service.gov.uk) — the official UK government registry. Returns company name, registration number, status, type, address, and incorporation date. LEGAL NOTICE: Results sourced from official UK Companies House API. We do not log your query content. Results are informational only. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Company name to search for' }, jurisdiction: { type: 'string', description: 'Optional country code: gb, sg, us' } }, required: ['query'] }
+  },
+  {
+    name: 'get_company_profile',
+    description: 'Call this tool when your agent needs the full official profile of a company — registration status, registered address, SIC industry codes, accounts filing history, and incorporation date. Use when you have a company number and need to confirm the company is active and in good standing before signing a contract, making a payment, or approving a vendor. Data sourced directly from UK Companies House API (api.company-information.service.gov.uk). LEGAL NOTICE: Results sourced from official UK Companies House API. We do not log your query content. Results are informational only. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
+  },
+  {
+    name: 'verify_company',
+    description: 'Call this tool when your agent needs a KYC-style confirmation that a company is real, active, and matches the details provided. Returns a confidence rating of HIGH, MEDIUM, or LOW based on name match, registration number match, and active status in the official registry. Use before onboarding any new supplier, customer, or contractor. Catches name variations, dissolved companies, and companies that do not exist. Data sourced from UK Companies House API (api.company-information.service.gov.uk). LEGAL NOTICE: Results sourced from official UK Companies House API. We do not log your query content. Results are informational only. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to verify' }, company_number: { type: 'string', description: 'Optional registration number to verify against' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
+  },
+  {
+    name: 'check_company_risk',
+    description: 'Call this tool when your agent needs an AI-powered risk assessment of a company before entering a business relationship, approving a transaction, or making a compliance decision. Uses AI analysis to synthesise official registry data — this is NOT a simple database lookup. Returns risk score 0-100, risk level LOW/MEDIUM/HIGH/CRITICAL, specific risk factors identified, positive indicators, and recommended due diligence actions. Catches: recently incorporated companies, dissolved or struck-off status, high-risk SIC codes, abnormal filing history, shell company indicators. Use before any significant B2B transaction. Data sourced from UK Companies House API (api.company-information.service.gov.uk) with AI synthesis. LEGAL NOTICE: AI-powered analysis. Results are informational only and not a substitute for professional compliance advice. We do not log your query content. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: { type: 'object', properties: { company_name: { type: 'string', description: 'Company name to assess' }, company_number: { type: 'string', description: 'Optional registration number for more accurate results' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us' } }, required: ['company_name'] }
+  },
+  {
+    name: 'get_officers',
+    description: 'Call this tool when your agent needs to identify the directors, officers, or beneficial owners of a company — for KYC onboarding, due diligence on counterparty management, or sanctions screening of individuals associated with a company. Returns full list of current and former officers including appointment dates, roles, nationalities, and resignation dates. Use to identify who actually controls a company before entering a significant contract or payment. Data sourced from UK Companies House API (api.company-information.service.gov.uk). LEGAL NOTICE: Results sourced from official UK Companies House API. We do not log your query content. Results are informational only. Full terms: kordagencies.com/terms.html. Free tier: first 20 calls/month, no API key needed.',
+    inputSchema: { type: 'object', properties: { company_number: { type: 'string', description: 'Company registration number' }, jurisdiction: { type: 'string', description: 'Country code: gb, sg, us. Defaults to gb.' } }, required: ['company_number'] }
+  },
+  {
+    name: 'screen_entity',
+    description: 'Call this tool to screen any person, company, or vessel against 328 global sanctions lists before entering any business relationship, transaction, or contract. Covers OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, and 320+ more. Supports fuzzy name matching and handles Arabic, Chinese, Cyrillic scripts. Returns match status, risk level CLEAR/LOW/MEDIUM/HIGH/CRITICAL, recommended action PROCEED/ENHANCED_DUE_DILIGENCE/BLOCK, sanction programs hit, and specific lists matched. Data sourced from OpenSanctions API (api.opensanctions.org) — updated daily across all 328 lists. Use before issuing any Letter of Credit, processing any payment, or onboarding any new counterparty. Also use for ongoing monitoring — screen all active counterparties monthly as sanctions lists change daily. IMPORTANT: Billed at GBP 0.15/check Pro, GBP 0.125/check Enterprise. Paid API key required. LEGAL NOTICE: Results sourced from OpenSanctions API covering 328 global lists updated daily. We do not log your query content. Results do not constitute a legal determination of sanctions status. Operator must verify independently. Full terms: kordagencies.com/terms.html',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Full name of person, company, or vessel to screen' },
+        entity_type: { type: 'string', description: 'Type: Person, Company, or Vessel. Defaults to Thing (all types).' },
+        country: { type: 'string', description: 'Optional ISO country code to narrow search (e.g. ru, cn, ir, kp)' },
+        context: { type: 'string', description: 'Optional context about this entity to improve result interpretation' }
+      },
+      required: ['name']
+    }
+  }
+];
+
+async function executeTool(name, args) {
+  const checkedAt = nowISO();
+
+  if (name === 'search_company') {
+    const r = await searchCompaniesHouse(args.query);
+    if (r._timeout) return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const items = r.items || [];
+    if (!items.length) return { found: false, message: 'No companies found for: ' + args.query, source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    return { found: true, total_results: r.total_results || items.length, companies: items.slice(0,5).map(c => ({ name: c.title, number: c.company_number, status: c.company_status, type: c.company_type, address: c.address_snippet, incorporated: c.date_of_creation })), source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+  }
+
+  if (name === 'get_company_profile') {
+    const d = await getCompanyDetails(args.company_number);
+    if (d._timeout) return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    if (d.error) return { error: 'Company not found: ' + args.company_number, source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    return { name: d.company_name, number: d.company_number, status: d.company_status, type: d.type, incorporated: d.date_of_creation, address: d.registered_office_address, sic_codes: d.sic_codes, accounts: d.accounts, jurisdiction: d.jurisdiction, source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+  }
+
+  if (name === 'get_officers') {
+    const d = await getOfficersData(args.company_number);
+    if (d._timeout) return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const items = d.items || [];
+    return { total_officers: d.total_results || items.length, officers: items.map(o => ({ name: o.name, role: o.officer_role, appointed: o.appointed_on, resigned: o.resigned_on || null, nationality: o.nationality })), source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+  }
+
+  if (name === 'verify_company') {
+    const r = await searchCompaniesHouse(args.company_name);
+    if (r._timeout) return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const items = r.items || [];
+    const company = args.company_number ? items.find(c => c.company_number === args.company_number) || items[0] : items.find(c => c.title.toLowerCase() === args.company_name.toLowerCase()) || items[0];
+    if (!company) return { verified: false, confidence: 'LOW', reason: 'Company not found in UK Companies House registry. This may indicate the company does not exist, is registered in a different jurisdiction, or the name is spelled differently.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const nameMatch = company.title.toLowerCase() === args.company_name.toLowerCase();
+    const numberMatch = !args.company_number || company.company_number === args.company_number;
+    const isActive = company.company_status === 'active';
+    let confidence = 'LOW';
+    if (nameMatch && numberMatch && isActive) confidence = 'HIGH';
+    else if ((nameMatch || numberMatch) && isActive) confidence = 'MEDIUM';
+    return { verified: confidence !== 'LOW', confidence, matched_name: company.title, matched_number: company.company_number, status: company.company_status, name_match: nameMatch, number_match: numberMatch, active: isActive, incorporated: company.date_of_creation, source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+  }
+
+  if (name === 'check_company_risk') {
+    const r = await searchCompaniesHouse(args.company_name);
+    if (r._timeout) return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const items = r.items || [];
+    const company = args.company_number ? items.find(c => c.company_number === args.company_number) || items[0] : items[0];
+    let companyData = {};
+    if (company) companyData = await getCompanyDetails(company.company_number);
+    const prompt = 'You are a trade finance and KYC risk analyst. Assess the risk of this company for international trade.\n\nCompany: ' + args.company_name + '\nRegistry data: ' + JSON.stringify(Object.assign({}, company, companyData)) + '\n\nThis is AI-powered analysis synthesising official registry data — not a simple database lookup.\n\nReturn ONLY valid JSON with no preamble:\n{"risk_score":<0-100>,"risk_level":"LOW|MEDIUM|HIGH|CRITICAL","risk_factors":[...],"positive_indicators":[...],"recommended_actions":[...],"summary":"<2 sentences>"}';
+    try {
+      const response = await callClaude(prompt);
+      const result = JSON.parse(response.replace(/```json|```/g, '').trim());
+      return Object.assign({}, result, { analysis_type: 'AI-powered — NOT a simple database lookup', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER });
+    } catch(e) {
+      return { risk_score: 50, risk_level: 'MEDIUM', analysis_type: 'AI-powered — NOT a simple database lookup', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, error: 'AI analysis unavailable — manual review recommended', _disclaimer: LEGAL_DISCLAIMER };
+    }
+  }
+
+  if (name === 'screen_entity') {
+    const raw = await screenEntityOpenSanctions(args.name, args.entity_type || 'Thing', args.country);
+    if (!raw) return { error: 'OpenSanctions API is temporarily unavailable. This does not mean the entity is clear — please retry before proceeding with any transaction.', source_url: 'api.opensanctions.org', lists_checked: 328, checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    const results = raw.responses?.q1?.results || [];
+    const matches = results.filter(r => r.match === true && r.score >= 0.7);
+    const topMatch = matches[0];
+    if (!topMatch) {
+      return { screened: true, entity: args.name, sanctioned: false, match_found: false, risk_level: 'CLEAR', recommended_action: 'PROCEED', summary: 'No sanctions matches found for "' + args.name + '" across 328 global sanctions lists.', source_url: 'api.opensanctions.org', lists_checked: 328, checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+    }
+    const topics = topMatch.properties?.topics || [];
+    const isSanctioned = topics.includes('sanction') || topics.includes('debarment');
+    const programs = topMatch.properties?.programId || [];
+    const datasets = topMatch.datasets || [];
+    let riskLevel = 'LOW';
+    let action = 'ENHANCED_DUE_DILIGENCE';
+    if (isSanctioned) { riskLevel = 'CRITICAL'; action = 'BLOCK'; }
+    else if (topics.includes('wanted') || topics.includes('export.control')) { riskLevel = 'HIGH'; action = 'ENHANCED_DUE_DILIGENCE'; }
+    else if (topics.includes('role.pep')) { riskLevel = 'MEDIUM'; action = 'ENHANCED_DUE_DILIGENCE'; }
+    return {
+      screened: true, entity: args.name, sanctioned: isSanctioned, match_found: true,
+      matched_name: topMatch.caption, match_score: Math.round(topMatch.score * 100) / 100,
+      risk_level: riskLevel, recommended_action: action,
+      sanction_programs: programs.slice(0, 10), topics,
+      lists_hit: datasets.slice(0, 10), source_url: 'api.opensanctions.org', lists_checked: 328,
+      checked_at: checkedAt,
+      birth_date: topMatch.properties?.birthDate?.[0] || null,
+      nationality: topMatch.properties?.nationality?.[0] || null,
+      summary: isSanctioned
+        ? 'SANCTIONED: "' + topMatch.caption + '" appears on ' + programs.length + ' sanctions programs including ' + datasets.slice(0,3).join(', ') + '. Recommend blocking this transaction immediately.'
+        : 'MATCH FOUND: "' + topMatch.caption + '" is flagged as ' + topics.join(', ') + ' but not directly sanctioned. Enhanced due diligence required.',
+      trade_finance_note: isSanctioned
+        ? 'Do not issue Letter of Credit, Bill of Lading, or process any payment. Notify compliance officer immediately.'
+        : 'Conduct enhanced due diligence. Obtain additional documentation. Consider escalating to compliance officer.',
+      other_matches: matches.slice(1, 3).map(m => ({ name: m.caption, score: Math.round(m.score * 100) / 100, sanctioned: m.properties?.topics?.includes('sanction') || false })),
+      _disclaimer: LEGAL_DISCLAIMER
+    };
+  }
+  return { error: 'Unknown tool: ' + name };
+}
+
+function checkAccess(req) {
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey) {
+    const record = apiKeys.get(apiKey);
+    if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com', tier: 'invalid' };
+    if (record.limit !== Infinity && record.calls >= record.limit) return { allowed: false, reason: 'Monthly limit of ' + record.limit + ' calls reached. Upgrade at kordagencies.com', tier: 'limit_reached' };
+    record.calls++;
+    return { allowed: true, tier: record.plan, record, key: apiKey };
+  }
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const calls = freeTierUsage.get(ip) || 0;
+  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' calls/month reached. You have seen it work — upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.', upgrade_url: 'https://kordagencies.com', tier: 'free_limit_reached' };
+  freeTierUsage.set(ip, calls + 1);
+  saveStats();
+  const remaining = FREE_TIER_LIMIT - calls - 1;
+  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining. Upgrade at kordagencies.com' : null };
+}
+
+function checkSanctionsAccess(req) {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Billed at GBP 0.15/check Pro, GBP 0.125/check Enterprise.' };
+  const record = apiKeys.get(apiKey);
+  if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
+  const limit = SANCTIONS_LIMITS[record.plan] || 500;
+  const used = record.sanctionsChecks || 0;
+  if (used >= limit) return { allowed: false, reason: 'Sanctions screening limit of ' + limit + ' checks/month reached. Contact ojas@kordagencies.com to discuss higher limits.', checks_used: used, checks_limit: limit };
+  record.sanctionsChecks = used + 1;
+  const price = SANCTIONS_PRICE[record.plan] || 0.15;
+  return { allowed: true, checks_used: used + 1, checks_remaining: limit - used - 1, checks_limit: limit, cost_this_call: 'GBP ' + price.toFixed(3), plan: record.plan };
+}
+
+async function handleStripeWebhook(body) {
+  try {
+    const event = JSON.parse(body);
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const email = session.customer_email || session.customer_details?.email;
+      const plan = getPlanFromProduct(session.metadata?.product_name || '');
+      if (email) {
+        const apiKey = generateApiKey();
+        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan], sanctionsChecks: 0 });
+        await sendApiKeyEmail(email, apiKey, plan);
+        console.log('API key created for ' + email + ' (' + plan + ')');
+        return { success: true, email, plan };
+      }
+    }
+    return { received: true, type: event.type };
+  } catch(e) { console.error('Webhook error:', e.message); return { error: e.message }; }
+}
+
+const server = http.createServer(async (req, res) => {
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
+  if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
+
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', version: '4.6.0', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    return;
+  }
+
+  if (req.url === '/stats' && req.method === 'GET') {
+    if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
+    const toolCounts = {};
+    usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
+    const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ free_tier_unique_ips: freeTierUsage.size, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
+    return;
+  }
+
+  if (req.url === '/webhook/stripe' && req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => { const result = await handleStripeWebhook(body); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(result)); });
+    return;
+  }
+
+  if (req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const request = JSON.parse(body);
+        let sanctionsMeta = null;
+        if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
+          const toolName = request.method === 'tools/call' ? request.params?.name : null;
+          if (toolName === 'screen_entity') {
+            const sanctionsAccess = checkSanctionsAccess(req);
+            if (!sanctionsAccess.allowed) { res.writeHead(402, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, data: sanctionsAccess } })); return; }
+            sanctionsMeta = sanctionsAccess;
+          } else {
+            const access = checkAccess(req);
+            if (!access.allowed) { res.writeHead(429, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com' } })); return; }
+            req._accessWarning = access.warning; req._tier = access.tier;
+          }
+        }
+        let response;
+        if (request.method === 'initialize') {
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.6.0', description: 'Counterparty trust layer for AI agents. Verify any company before doing business. AI-powered risk assessment. Sanctions screening across 328 global lists. Free tier: 20 calls/month.' } } };
+        } else if (request.method === 'notifications/initialized') {
+          res.writeHead(204, cors); res.end(); return;
+        } else if (request.method === 'tools/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { tools } };
+        } else if (request.method === 'resources/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
+        } else if (request.method === 'prompts/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
+        } else if (request.method === 'tools/call') {
+          const { name, arguments: args } = request.params;
+          const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+          usageLog.push({ tool: name, tier: req._tier || (sanctionsMeta ? sanctionsMeta.plan : 'paid'), time: new Date().toISOString(), ip: ip.slice(0,8) + '...' });
+          if (usageLog.length > 1000) usageLog.shift();
+          saveStats();
+          const result = await executeTool(name, args || {});
+          if (req._accessWarning) result._notice = req._accessWarning;
+          if (sanctionsMeta) result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
+          response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+        } else {
+          response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
+        }
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(response));
+      } catch(e) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.6.0', status: 'ok', tools: 6, free_tier: '20 calls/month, no API key required', sanctions_screening: 'available for paid plans — 328 global lists via OpenSanctions', upgrade: 'https://kordagencies.com' }));
+    return;
+  }
+
+  res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
+});
+
+server.listen(PORT, () => {
+  loadStats();
+  console.log('Bizfile MCP v4.6.0 running on port ' + PORT);
+  console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
+  console.log('Sanctions screening: ' + (OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'));
+  console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
+  console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
+});
