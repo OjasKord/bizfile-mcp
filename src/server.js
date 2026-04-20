@@ -480,8 +480,8 @@ async function handleStripeWebhook(body, sig) {
 
 // ─── HTTP SERVER ──────────────────────────────────────────────────────────────
 
-const server = const sseClients = new Map();
-http.createServer(async (req, res) => {
+const sseClients = new Map();
+const server = http.createServer(async (req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, x-api-key, mcp-session-id, x-stats-key' };
   if (req.method === 'OPTIONS') { res.writeHead(200, cors); res.end(); return; }
 
