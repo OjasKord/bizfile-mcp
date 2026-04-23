@@ -5,4 +5,13 @@
 node_modules/
 MCP-Build-Playbook.pdf
 mcp-publisher.exe
-test.js
+test.js*.cjs 
+*.bak 
+patch_*.js 
+fix_*.js 
+fix.js 
+inject_*.js 
+*.txt 
+*.pdf 
+full.txt 
+snippet.txt 
