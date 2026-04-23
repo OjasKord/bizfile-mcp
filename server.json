@@ -3,7 +3,8 @@
   "name": "io.github.OjasKord/bizfile-mcp",
   "title": "Bizfile MCP",
   "description": "Company intelligence and sanctions screening across 130+ jurisdictions and 328 sanctions lists.",
-  "version": "4.2.0",
+  "version": "4.10.0",
+  "websiteUrl": "https://kordagencies.com",
   "repository": {
     "url": "https://github.com/OjasKord/bizfile-mcp",
     "source": "github"
@@ -13,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "bizfile-mcp",
-      "version": "1.3.4",
+      "version": "4.10.0",
       "transport": {
         "type": "stdio"
       },
