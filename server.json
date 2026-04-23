@@ -12,19 +12,13 @@
   "packages": [
     {
       "registryType": "npm",
-      "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "bizfile-mcp",
       "version": "4.10.0",
-      "transport": {
-        "type": "stdio"
-      },
-      "environmentVariables": []
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "ANTHROPIC_API_KEY", "description": "Anthropic API key for AI-powered risk scoring", "isRequired": true, "isSecret": true }
+      ]
     }
   ],
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://bizfile-mcp-production.up.railway.app"
-    }
-  ]
+  "remotes": [{ "type": "streamable-http", "url": "https://bizfile-mcp-production.up.railway.app" }]
 }
