@@ -5,6 +5,22 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.2 — 2026-04-25
+
+### Fixed
+- `const VERSION` added as single source of truth -- all /health, initialize, GET /, and startup log now use VERSION constant
+- SSE /messages initialize capabilities now includes `resources: {}` and `prompts: {}` -- was `{ tools: {} }` only
+- `/.well-known/mcp/server-card.json` endpoint added -- required by Smithery for server discovery
+- `agent_action` added to all `validate_counterparty` result paths: PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK derived from `risk_level`
+- `agent_action` added to all error responses across HTTP POST, SSE, and executeTool paths
+- `resources/list` and `prompts/list` cases added to SSE handler
+
+### Added
+- stdio transport handler (`setupStdio()`) -- enables direct Claude Desktop / npm package usage
+- `description` field added to all `serverInfo` objects in initialize responses (HTTP, SSE, stdio)
+
+---
+
 ## v4.6.0 — 2026-04-09
 
 ### Added

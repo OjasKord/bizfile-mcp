@@ -29,6 +29,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
+const VERSION = '4.10.2';
 
 const freeTierUsage = new Map();
 const usageLog = [];
@@ -178,7 +179,7 @@ async function executeTool(name, args) {
     // Step 1: Find the company in the registry
     const searchResult = await searchCompaniesHouse(companyName);
     if (searchResult._timeout) {
-      return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', agent_action: 'RETRY_IN_2_MIN', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
     }
 
     const items = searchResult.items || [];
@@ -190,6 +191,7 @@ async function executeTool(name, args) {
       return {
         company_found: false,
         company_name_searched: companyName,
+        agent_action: 'ENHANCED_DUE_DILIGENCE',
         kyc_confidence: 'LOW',
         risk_score: 75,
         risk_level: 'HIGH',
@@ -245,6 +247,7 @@ async function executeTool(name, args) {
 
     return {
       company_found: true,
+      agent_action: aiRisk.risk_level === 'CRITICAL' ? 'BLOCK' : (aiRisk.risk_level === 'HIGH' || aiRisk.risk_level === 'MEDIUM') ? 'ENHANCED_DUE_DILIGENCE' : 'PROCEED',
       // Registry data
       registered_name: company.title,
       registration_number: company.company_number,
@@ -394,7 +397,7 @@ async function executeTool(name, args) {
     };
   }
 
-  return { error: 'Unknown tool: ' + name };
+  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN' };
 }
 
 // ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
@@ -487,7 +490,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', version: '4.10.0', service: 'counterparty-validator-mcp', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
+    res.end(JSON.stringify({ status: 'ok', version: VERSION, service: 'counterparty-validator-mcp', free_tier: 'no API key required for first 20 calls', paid_keys_issued: apiKeys.size, sanctions_screening: OPENSANCTIONS_API_KEY ? 'enabled' : 'disabled' }));
     return;
   }
 
@@ -541,6 +544,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/.well-known/mcp/server-card.json' && req.method === 'GET') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ name: 'bizfile-mcp', title: 'Bizfile MCP', version: VERSION, description: 'Counterparty validator for AI agents. Registry lookup, AI risk score 0-100, KYC confidence, officers and directors, sanctions screening across 328 lists.', tools: ['validate_counterparty', 'screen_counterparty'], transport: ['http', 'stdio'], homepage: 'https://kordagencies.com' }));
+    return;
+  }
+
   // SSE Transport for n8n MCP Client Tool node
     if (req.url === '/sse' && req.method === 'GET') {
     const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -568,15 +577,19 @@ const server = http.createServer(async (req, res) => {
         const request = JSON.parse(body);
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.10.0' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Counterparty Validator for AI agents. Registry lookup, AI risk score 0-100, KYC confidence, officers and directors. screen_counterparty screens 328 global sanctions lists. Free tier: 20 calls/month, no API key needed.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
           response = { jsonrpc: '2.0', id: request.id, result: { tools } };
+        } else if (request.method === 'resources/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { resources: [] } };
+        } else if (request.method === 'prompts/list') {
+          response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         } else if (request.method === 'tools/call') {
           const access = checkAccess(req);
           if (!access.allowed) {
-            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com' } };
+            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com', agent_action: 'Inform user free tier quota is exhausted. Upgrade required at kordagencies.com' } };
           } else {
             const { name, arguments: args } = request.params;
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
@@ -612,7 +625,7 @@ const server = http.createServer(async (req, res) => {
             const sanctionsAccess = checkSanctionsAccess(req);
             if (!sanctionsAccess.allowed) {
               res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, data: sanctionsAccess } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, agent_action: 'Sanctions screening requires a paid API key. Upgrade at kordagencies.com', data: sanctionsAccess } }));
               return;
             }
             sanctionsMeta = sanctionsAccess;
@@ -620,7 +633,7 @@ const server = http.createServer(async (req, res) => {
             const access = checkAccess(req);
             if (!access.allowed) {
               res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com' } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com', agent_action: 'Inform user free tier quota is exhausted. Upgrade required at kordagencies.com' } }));
               return;
             }
             req._accessWarning = access.warning;
@@ -631,7 +644,7 @@ const server = http.createServer(async (req, res) => {
         let response;
 
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: '4.10.0', description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -680,16 +693,57 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: '4.10.0', status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: VERSION, status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
     return;
   }
 
   res.writeHead(404, cors); res.end(JSON.stringify({ error: 'Not found' }));
 });
 
+function setupStdio() {
+  if (process.stdin.isTTY) return;
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {
+    buf += chunk;
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    lines.forEach(async line => {
+      if (!line.trim()) return;
+      let req;
+      try { req = JSON.parse(line); } catch(e) { return; }
+      let response;
+      if (req.method === 'initialize') {
+        response = { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Counterparty Validator for AI agents. One call validates any company: registry status, KYC confidence, AI risk score 0-100, directors and officers. Separate sanctions screening tool covers 328 global lists. Free tier: 20 calls/month, no API key needed.' } } };
+      } else if (req.method === 'notifications/initialized') {
+        return;
+      } else if (req.method === 'tools/list') {
+        response = { jsonrpc: '2.0', id: req.id, result: { tools } };
+      } else if (req.method === 'resources/list') {
+        response = { jsonrpc: '2.0', id: req.id, result: { resources: [] } };
+      } else if (req.method === 'prompts/list') {
+        response = { jsonrpc: '2.0', id: req.id, result: { prompts: [] } };
+      } else if (req.method === 'tools/call') {
+        try {
+          const result = await executeTool(req.params.name, req.params.arguments || {});
+          response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+        } catch(e) {
+          response = { jsonrpc: '2.0', id: req.id, error: { code: -32603, message: e.message, agent_action: 'RETRY_IN_2_MIN' } };
+        }
+      } else {
+        response = { jsonrpc: '2.0', id: req.id, error: { code: -32601, message: 'Method not found: ' + req.method } };
+      }
+      process.stdout.write(JSON.stringify(response) + '\n');
+    });
+  });
+  process.stdin.resume();
+}
+
+setupStdio();
+
 server.listen(PORT, () => {
   loadStats();
-  console.log('Counterparty Validator MCP v4.10.0 running on port ' + PORT);
+  console.log('Counterparty Validator MCP v' + VERSION + ' running on port ' + PORT);
   console.log('Tools: 2 (validate_counterparty, screen_counterparty)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
   console.log('Sanctions screening: ' + (OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'));
