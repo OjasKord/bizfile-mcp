@@ -5,6 +5,12 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.3 — 2026-04-26
+
+### Improved
+- validate_counterparty and screen_counterparty descriptions rewritten with TCO framework: irresistibility opening, criminal liability consequence, exact data source hostnames, prepaid bundle pricing last
+- Initialize serverInfo description rewritten with TCO framework (all 3 transport paths)
+
 ## v4.10.2 — 2026-04-25
 
 ### Fixed
