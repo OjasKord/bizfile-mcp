@@ -1,4 +1,4 @@
-# Smithery configuration for Bizfile MCP
+description: "Company verifier for AI agents. Sanctions lists, Companies House, ACRA. KYC and AML screening."
 startCommand:
   type: http
   url: https://bizfile-mcp-production.up.railway.app
@@ -7,79 +7,59 @@ startCommand:
     properties:
       apiKey:
         type: string
-        description: "Bizfile MCP API key from kordagencies.com. Leave blank for free tier (20 calls/month). Required for screen_entity sanctions screening."
+        description: "Bizfile MCP API key from kordagencies.com. Leave blank for free tier (20 calls/month). Required for screen_counterparty sanctions screening."
         x-from:
           header: "x-api-key"
     required: []
 systemPrompt: |
-  You have access to Bizfile MCP - a company intelligence and sanctions screening server providing real-time verified data from official government registries and 328 global sanctions lists. All results come from live APIs. No hallucinated data.
+  Bizfile MCP is a counterparty intelligence and sanctions screening layer for AI agents.
 
-  AVAILABLE TOOLS
+  It combines live company registry data (UK Companies House, Singapore ACRA, and 130+ jurisdictions) with real-time sanctions screening against 328 global lists to give agents a complete picture before any B2B transaction or payment.
 
-  search_company - Search for any company by name
-  - Searches UK Companies House, Singapore ACRA, US SEC EDGAR, and 130+ jurisdictions
-  - Returns: company name, registration number, status, address, incorporation date
-  - Use this first to find a company registration number for subsequent calls
-  - Free tier: included
+  TWO LAYERS OF INTELLIGENCE
 
-  get_company_profile - Full company registry profile
-  - Returns: registration status, registered address, SIC codes, accounts filing dates, confirmation statement status
-  - Requires: company_number (obtain from search_company first)
-  - Free tier: included
+  Layer 1 - Registry Intelligence (validate_counterparty)
+  Confirms a company is real, active, and registered with official authorities. Returns KYC confidence rating, AI risk score 0-100, officer list, and a sanctions screening prompt for the next step.
 
-  verify_company - KYC-style verification
-  - Returns: confidence rating HIGH/MEDIUM/LOW, name_match boolean, number_match boolean, active status
-  - Use for: counterparty onboarding, KYC workflows, identity confirmation
-  - Free tier: included
+  Layer 2 - Sanctions Screening (screen_counterparty)
+  Screens the company and all directors against 328 global sanctions lists simultaneously: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, and 323 more.
 
-  check_company_risk - AI-powered risk assessment
-  - Returns: risk_score 0-100, risk_level LOW/MEDIUM/HIGH/CRITICAL, risk_factors array, positive_indicators array, recommended_actions array
-  - Use for: trade finance counterparty checks, investment due diligence, compliance screening
-  - Free tier: included
+  WHEN TO USE THIS SERVER
 
-  get_officers - Directors and officers list
-  - Returns: full officer list with names, roles, appointment dates, resignation dates, nationalities
-  - Use for: beneficial ownership checks, UBO identification, director screening
-  - Pass director names to screen_entity for individual sanctions checks
-  - Free tier: included
+  Use these tools whenever your agent is about to:
+  - Onboard a new supplier, vendor, counterparty, or customer
+  - Approve or initiate a payment to an unfamiliar company
+  - Sign or draft a B2B contract
+  - Conduct trade finance due diligence
+  - Run periodic compliance checks on active counterparties
+  - Identify beneficial ownership or director sanctions exposure
 
-  screen_entity - Global sanctions screening (PAID ONLY)
-  - Screens persons, companies, or vessels against 328 global sanctions lists
-  - Lists include: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Japan METI, Canada SEMA, Switzerland SECO, Malaysia MHA, Indonesia DTTOT, and 317 more
-  - Handles Arabic, Chinese, Cyrillic, Korean scripts via fuzzy matching
-  - Returns: recommended_action (BLOCK/ENHANCED_DUE_DILIGENCE/PROCEED), risk_level, sanction_programs, trade_finance_note, _billing metadata, _disclaimer
-  - Cost: 0.15 GBP per check (Pro plan), 0.125 GBP per check (Enterprise plan)
-  - Cap: 500 checks/month Pro, 2000 checks/month Enterprise
+  RECOMMENDED WORKFLOW
+
+  When your agent needs to verify a counterparty before payment or onboarding:
+  1. validate_counterparty - confirm registration, get AI risk score 0-100, get officer list
+  2. screen_counterparty - pass company name and officers array to screen all against 328 lists
+  Only proceed if verdict is PROCEED for all entities.
+
+  TOOLS
+
+  validate_counterparty
+  - Searches UK Companies House, Singapore ACRA, and 130+ jurisdictions
+  - Returns: KYC confidence HIGH/MEDIUM/LOW, risk_score 0-100, risk_level, officers array, registered address, incorporation date
+  - Use this first -- officers array feeds directly into screen_counterparty
+  - Free tier: first 20 calls/month, no API key needed
+
+  screen_counterparty (PAID ONLY)
+  - Screens company and directors against 328 global sanctions lists simultaneously
+  - Lists include: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Canada SEMA, and 321 more -- updated daily
+  - Pass the officers array from validate_counterparty directly to screen all directors in one call
+  - Returns: verdict (BLOCK / ENHANCED_DUE_DILIGENCE / PROCEED) per entity, match_score, sanction_programs triggered, agent_action
+  - A single BLOCK on any director halts the entire transaction
   - Requires paid API key from kordagencies.com
-  - LEGAL NOTICE: Results are for informational purposes only. Not a substitute for professional compliance advice. Operator must verify results independently. Full terms: kordagencies.com/terms.html
 
-  RECOMMENDED WORKFLOWS
-
-  Quick counterparty check:
-  1. search_company -> get registration number
-  2. check_company_risk -> get risk score and factors
-
-  Full KYC and onboarding:
-  1. search_company -> find company
-  2. verify_company -> KYC confidence rating
-  3. get_company_profile -> verify filing status
-  4. get_officers -> beneficial ownership
-
-  Trade finance due diligence (full):
-  1. search_company -> confirm company exists, get registration number
-  2. verify_company -> KYC confidence rating
-  3. screen_entity (company) -> sanctions check on counterparty
-  4. get_officers -> get director names
-  5. screen_entity (each director) -> sanctions check on individuals
-  6. screen_entity (vessel name) -> sanctions check on shipping vessel
-  7. check_company_risk -> overall AI risk score
-
-  BILLING METADATA
-
-  Every screen_entity response includes a _billing field with checks_used, checks_remaining, checks_limit, and cost_this_call.
-  When the cap is reached the server returns error code -32002 with checks_used and checks_limit fields so agents can handle this programmatically.
+  LEGAL NOTICE
+  Results sourced from official government registries and OpenSanctions (api.opensanctions.org). We do not log your query content. Not a legal determination of sanctions status. Full terms: kordagencies.com/terms.html
 
   FREE TIER
-
-  20 calls/month with no API key required. Covers all tools except screen_entity.
-  Upgrade at kordagencies.com for Pro (299 USD/month) or Enterprise (999 USD/month).
+  20 calls/month with no API key. Covers validate_counterparty only.
+  Upgrade at kordagencies.com for screen_counterparty access.
