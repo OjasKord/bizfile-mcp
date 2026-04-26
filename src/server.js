@@ -29,7 +29,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.3';
+const VERSION = '4.10.4';
 
 const freeTierUsage = new Map();
 const usageLog = [];
@@ -161,6 +161,18 @@ const tools = [
       },
       required: ['company_name']
     }
+  },
+  {
+    name: 'validate_counterparty_lite',
+    description: 'CALL THIS TOOL when your orchestrator is budget-constrained and cannot afford the full AI risk analysis. validate_counterparty_lite is a registry-only check -- no AI call, no officers fetch, no sanctions note. Returns company status, registration number, KYC confidence, and agent_action in under 1 second at roughly 60% lower token cost than validate_counterparty. Use when: (1) you need to confirm a company exists and is active before committing to a heavier workflow, (2) your budget ledger has less than 500 tokens remaining for this call, or (3) you are running a high-volume pipeline where AI risk scoring is handled downstream. If agent_action is PROCEED, optionally follow up with validate_counterparty for full AI risk and then screen_counterparty for sanctions. Data: UK Companies House (api.company-information.service.gov.uk) registry lookup only. LEGAL NOTICE: Results sourced from official government registry. No AI analysis -- do not rely on this tool as a substitute for full due diligence. Full terms: kordagencies.com/terms.html. Free tier: 20 calls/month.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        company_name: { type: 'string', description: 'Full or partial name of the company to look up' },
+        company_number: { type: 'string', description: 'Optional: registration number for exact match' }
+      },
+      required: ['company_name']
+    }
   }
 ];
 
@@ -179,7 +191,9 @@ async function executeTool(name, args) {
     // Step 1: Find the company in the registry
     const searchResult = await searchCompaniesHouse(companyName);
     if (searchResult._timeout) {
-      return { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', agent_action: 'RETRY_IN_2_MIN', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      const _rTimeout = { error: 'UK Companies House API is temporarily unavailable. This is not a problem with your query. Please retry in 2-3 minutes.', agent_action: 'RETRY_IN_2_MIN', category: 'upstream_unavailable', retryable: true, retry_after_ms: 120000, fallback_tool: 'validate_counterparty_lite', trace_id: Math.random().toString(36).slice(2, 10), source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      _rTimeout.token_count = Math.ceil(JSON.stringify(_rTimeout).length / 4);
+      return _rTimeout;
     }
 
     const items = searchResult.items || [];
@@ -188,7 +202,7 @@ async function executeTool(name, args) {
       : items.find(c => c.title.toLowerCase() === companyName.toLowerCase()) || items[0];
 
     if (!company) {
-      return {
+      const _rNotFound = {
         company_found: false,
         company_name_searched: companyName,
         agent_action: 'ENHANCED_DUE_DILIGENCE',
@@ -202,6 +216,8 @@ async function executeTool(name, args) {
         checked_at: checkedAt,
         _disclaimer: LEGAL_DISCLAIMER
       };
+      _rNotFound.token_count = Math.ceil(JSON.stringify(_rNotFound).length / 4);
+      return _rNotFound;
     }
 
     // Step 2: Fetch full profile and officers in parallel
@@ -245,7 +261,7 @@ async function executeTool(name, args) {
       console.error('AI risk scoring error:', e.message);
     }
 
-    return {
+    const _rValidate = {
       company_found: true,
       agent_action: aiRisk.risk_level === 'CRITICAL' ? 'BLOCK' : (aiRisk.risk_level === 'HIGH' || aiRisk.risk_level === 'MEDIUM') ? 'ENHANCED_DUE_DILIGENCE' : 'PROCEED',
       // Registry data
@@ -281,6 +297,8 @@ async function executeTool(name, args) {
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
+    _rValidate.token_count = Math.ceil(JSON.stringify(_rValidate).length / 4);
+    return _rValidate;
   }
 
   // ── screen_counterparty ────────────────────────────────────────────────────
@@ -373,7 +391,7 @@ async function executeTool(name, args) {
     if (blockCount > 0) overallVerdict = 'BLOCK';
     else if (eddCount > 0) overallVerdict = 'ENHANCED_DUE_DILIGENCE';
 
-    return {
+    const _rScreen = {
       company_name: companyName,
       entities_screened: entitiesToScreen.length,
       overall_verdict: overallVerdict,
@@ -395,9 +413,56 @@ async function executeTool(name, args) {
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
+    _rScreen.token_count = Math.ceil(JSON.stringify(_rScreen).length / 4);
+    return _rScreen;
   }
 
-  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN' };
+  // ── validate_counterparty_lite ────────────────────────────────────────────
+  // Registry-only check. No AI call, no officers. Fast + low token cost.
+  if (name === 'validate_counterparty_lite') {
+    const companyName = args.company_name;
+    const companyNumber = args.company_number;
+    const searchResult = await searchCompaniesHouse(companyName);
+    if (searchResult._timeout) {
+      const _rLiteTimeout = { error: 'UK Companies House API is temporarily unavailable. Please retry in 2-3 minutes.', agent_action: 'RETRY_IN_2_MIN', category: 'upstream_unavailable', retryable: true, retry_after_ms: 120000, fallback_tool: 'validate_counterparty_lite', trace_id: Math.random().toString(36).slice(2, 10), source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      _rLiteTimeout.token_count = Math.ceil(JSON.stringify(_rLiteTimeout).length / 4);
+      return _rLiteTimeout;
+    }
+    const items = searchResult.items || [];
+    const company = companyNumber
+      ? items.find(c => c.company_number === companyNumber) || items[0]
+      : items.find(c => c.title.toLowerCase() === companyName.toLowerCase()) || items[0];
+    if (!company) {
+      const _rLiteNotFound = { company_found: false, company_name_searched: companyName, agent_action: 'ENHANCED_DUE_DILIGENCE', kyc_confidence: 'LOW', message: 'No matching company found in UK Companies House registry.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      _rLiteNotFound.token_count = Math.ceil(JSON.stringify(_rLiteNotFound).length / 4);
+      return _rLiteNotFound;
+    }
+    const isActive = company.company_status === 'active';
+    const nameMatch = company.title.toLowerCase() === companyName.toLowerCase();
+    const numberMatch = !companyNumber || company.company_number === companyNumber;
+    let kycConfidence = 'LOW';
+    if (nameMatch && numberMatch && isActive) kycConfidence = 'HIGH';
+    else if ((nameMatch || numberMatch) && isActive) kycConfidence = 'MEDIUM';
+    const _rLite = {
+      company_found: true,
+      agent_action: isActive ? 'PROCEED' : 'ENHANCED_DUE_DILIGENCE',
+      registered_name: company.title,
+      registration_number: company.company_number,
+      status: company.company_status,
+      incorporation_date: company.date_of_creation,
+      registered_address: company.address_snippet,
+      kyc_confidence: kycConfidence,
+      active: isActive,
+      analysis_type: 'Registry lookup only -- no AI analysis. Use validate_counterparty for full AI risk scoring.',
+      source_url: 'api.company-information.service.gov.uk',
+      checked_at: checkedAt,
+      _disclaimer: LEGAL_DISCLAIMER
+    };
+    _rLite.token_count = Math.ceil(JSON.stringify(_rLite).length / 4);
+    return _rLite;
+  }
+
+  return { error: 'Unknown tool: ' + name, agent_action: 'RETRY_IN_2_MIN', category: 'unknown_tool', retryable: false, retry_after_ms: null, fallback_tool: null, trace_id: Math.random().toString(36).slice(2, 10) };
 }
 
 // ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
@@ -494,6 +559,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/ready' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const checks = { anthropic: !!ANTHROPIC_API_KEY, companies_house: !!COMPANIES_HOUSE_API_KEY, opensanctions: !!OPENSANCTIONS_API_KEY };
+    const ready = checks.anthropic && checks.companies_house;
+    res.writeHead(ready ? 200 : 503, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: ready ? 'ready' : 'not_ready', version: VERSION, checks }));
+    return;
+  }
+
   if (req.url === '/deps' && req.method === 'GET') {
     const depCheck = (hostname, path, headers) => new Promise((resolve) => {
       const r = https.request({ hostname, path, method: 'GET', headers: Object.assign({ 'User-Agent': 'Bizfile-MCP-HealthCheck/1.0' }, headers || {}) }, (res2) => {
@@ -546,7 +619,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/.well-known/mcp/server-card.json' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', title: 'Bizfile MCP', version: VERSION, description: 'Counterparty validator for AI agents. Registry lookup, AI risk score 0-100, KYC confidence, officers and directors, sanctions screening across 328 lists.', tools: ['validate_counterparty', 'screen_counterparty'], transport: ['http', 'stdio'], homepage: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', title: 'Bizfile MCP', version: VERSION, description: 'Counterparty validator for AI agents. Registry lookup, AI risk score 0-100, KYC confidence, officers and directors, sanctions screening across 328 lists.', tools: ['validate_counterparty', 'screen_counterparty', 'validate_counterparty_lite'], transport: 'streamable-http', homepage: 'https://kordagencies.com', token_footprint_min: 400, token_footprint_max: 700, token_footprint_avg: 504, idempotent_tools: ['validate_counterparty', 'screen_counterparty', 'validate_counterparty_lite'], circuit_breaker: false, health_endpoint: '/health', ready_endpoint: '/ready' }));
     return;
   }
 
