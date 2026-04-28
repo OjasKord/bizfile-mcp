@@ -5,6 +5,12 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.5 — 2026-04-28
+
+### Changed
+- Payment links updated to prepaid bundle URLs: 500 calls for $20 (PRO) and 2,000 calls for $80 (Enterprise) -- calls never expire
+- Free tier limit error now directs agents to prepaid bundle purchase link directly
+
 ## v4.10.4 — 2026-04-27
 
 ### Added

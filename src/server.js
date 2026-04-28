@@ -29,7 +29,9 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.4';
+const VERSION = '4.10.5';
+const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
+const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 
 const freeTierUsage = new Map();
 const usageLog = [];
@@ -478,16 +480,16 @@ function checkAccess(req) {
   }
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const calls = freeTierUsage.get(ip) || 0;
-  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' calls/month reached. You have seen it work — upgrade to Pro ($299/month) at kordagencies.com for 10,000 calls/month.', upgrade_url: 'https://kordagencies.com', tier: 'free_limit_reached' };
+  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit reached. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.', upgrade_url: PRO_UPGRADE_URL, tier: 'free_limit_reached' };
   freeTierUsage.set(ip, calls + 1);
   saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
-  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining. Upgrade at kordagencies.com' : null };
+  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null };
 }
 
 function checkSanctionsAccess(req) {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get yours at kordagencies.com. Billed at GBP 0.15/check Pro, GBP 0.125/check Enterprise.' };
+  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' };
   const record = apiKeys.get(apiKey);
   if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
   const limit = SANCTIONS_LIMITS[record.plan] || 500;
@@ -662,7 +664,7 @@ const server = http.createServer(async (req, res) => {
         } else if (request.method === 'tools/call') {
           const access = checkAccess(req);
           if (!access.allowed) {
-            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com', agent_action: 'Inform user free tier quota is exhausted. Upgrade required at kordagencies.com' } };
+            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: PRO_UPGRADE_URL, agent_action: 'Inform user free tier quota is exhausted. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' } };
           } else {
             const { name, arguments: args } = request.params;
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
@@ -706,7 +708,7 @@ const server = http.createServer(async (req, res) => {
             const access = checkAccess(req);
             if (!access.allowed) {
               res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: 'https://kordagencies.com', agent_action: 'Inform user free tier quota is exhausted. Upgrade required at kordagencies.com' } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: PRO_UPGRADE_URL, agent_action: 'Inform user free tier quota is exhausted. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' } }));
               return;
             }
             req._accessWarning = access.warning;
@@ -744,9 +746,9 @@ const server = http.createServer(async (req, res) => {
             const isWarning = used >= FREE_TIER_WARNING;
             const gated = ['risk_factors', 'positive_indicators', 'recommended_actions', 'risk_summary', 'directors_and_officers', 'sic_codes', 'registered_address', 'accounts_last_filed', 'sanctions_screening_note'];
             gated.forEach(f => delete result[f]);
-            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + FREE_TIER_LIMIT + ' calls remaining this month. Upgrade to Pro ($299/month) at kordagencies.com for full risk factors, officer list, recommended actions, and sanctions screening note.';
+            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + FREE_TIER_LIMIT + ' calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire. Includes full risk factors, officer list, recommended actions, and sanctions screening.';
             result._gated_fields = gated;
-            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Upgrade to Pro at kordagencies.com to avoid interruption.';
+            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.';
           }
 
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
@@ -766,7 +768,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: VERSION, status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: 'https://kordagencies.com' }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: VERSION, status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: PRO_UPGRADE_URL }));
     return;
   }
 

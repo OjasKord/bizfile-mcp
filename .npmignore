@@ -22,3 +22,6 @@ inject_*.js
 *.pdf 
 src/bizfile_server_v460_clean.js 
 src/server_backup_v480.js 
+MCP-Build-Playbook-v2.md 
+MCP-Build-Playbook-v3.md 
+MCP-Product-Strategy.md 
