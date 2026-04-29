@@ -1,3 +1,5 @@
+[![smithery badge](https://smithery.ai/badge/OjasKord/bizfile-mcp)](https://smithery.ai/servers/OjasKord/bizfile-mcp)
+
 <!-- mcp-name: io.github.OjasKord/bizfile-mcp -->
 
 # Bizfile MCP — Counterparty Trust Layer for AI Agents
