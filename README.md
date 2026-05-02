@@ -126,11 +126,11 @@ Every response includes `source_url` and `checked_at` so agents can verify exact
 
 ## Pricing
 
-| Plan | Calls | Sanctions | Price |
-|---|---|---|---|
-| Free | 20/month | Not included | No API key required |
-| Pro | 10,000/month | 500 checks/month at GBP 0.15/check | $299/month |
-| Enterprise | Unlimited | 2,000 checks/month at GBP 0.125/check | $999/month |
+| Plan | Calls | Price |
+|---|---|---|
+| Free | 20/month | No API key required |
+| Starter | 500-call bundle | $20 |
+| Pro | 2,000-call bundle | $70 |
 
 Upgrade at **[kordagencies.com](https://kordagencies.com)**
 
