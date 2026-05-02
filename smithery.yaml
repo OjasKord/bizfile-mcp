@@ -57,6 +57,12 @@ systemPrompt: |
   - A single BLOCK on any director halts the entire transaction
   - Requires paid API key from kordagencies.com
 
+  validate_counterparty_lite
+  - Registry-only check with no AI call, no officers fetch, no sanctions note
+  - Returns company status, registration number, KYC confidence, and agent_action in under 1 second at ~60% lower token cost
+  - Use when budget-constrained or running high-volume pipelines where AI risk scoring is handled downstream
+  - Free tier: 20 calls/month, no API key needed
+
   LEGAL NOTICE
   Results sourced from official government registries and OpenSanctions (api.opensanctions.org). We do not log your query content. Not a legal determination of sanctions status. Full terms: kordagencies.com/terms.html
 
