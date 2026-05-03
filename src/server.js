@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const PERSIST_FILE = '/tmp/bizfile_stats.json';
+const API_KEYS_FILE = '/tmp/bizfile_apikeys.json';
 
 function saveStats() {
   try {
@@ -23,13 +24,29 @@ function loadStats() {
   } catch(e) { console.error('Stats load error:', e.message); }
 }
 
+function getMonthKey(ip) { return ip + ':' + new Date().toISOString().slice(0, 7); }
+
+function saveApiKeys() {
+  try { fs.writeFileSync(API_KEYS_FILE, JSON.stringify(Array.from(apiKeys.entries()))); } catch(e) { console.error('API keys save error:', e.message); }
+}
+
+function loadApiKeys() {
+  try {
+    if (fs.existsSync(API_KEYS_FILE)) {
+      const entries = JSON.parse(fs.readFileSync(API_KEYS_FILE, 'utf8'));
+      entries.forEach(([k, v]) => apiKeys.set(k, v));
+      console.log('API keys loaded: ' + apiKeys.size + ' keys');
+    }
+  } catch(e) { console.error('API keys load error:', e.message); }
+}
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.7';
+const VERSION = '4.10.8';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 
@@ -482,9 +499,10 @@ function checkAccess(req) {
     return { allowed: true, tier: record.plan, record, key: apiKey };
   }
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-  const calls = freeTierUsage.get(ip) || 0;
+  const monthKey = getMonthKey(ip);
+  const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit reached. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.', upgrade_url: PRO_UPGRADE_URL, tier: 'free_limit_reached' };
-  freeTierUsage.set(ip, calls + 1);
+  freeTierUsage.set(monthKey, calls + 1);
   saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
   return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null };
@@ -542,6 +560,7 @@ async function handleStripeWebhook(body, sig) {
       if (email) {
         const apiKey = generateApiKey();
         apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan], sanctionsChecks: 0 });
+        saveApiKeys();
         await sendApiKeyEmail(email, apiKey, plan);
         console.log('[bizfile] API key created for ' + email + ' (' + plan + ')');
         return { success: true, email, plan };
@@ -605,7 +624,8 @@ const server = http.createServer(async (req, res) => {
     usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
     const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ free_tier_unique_ips: freeTierUsage.size, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
+    const freeUniqueIPs = new Set(Array.from(freeTierUsage.keys()).map(k => k.split(':')[0])).size;
+    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
     return;
   }
 
@@ -744,7 +764,7 @@ const server = http.createServer(async (req, res) => {
           // Partial response for free tier on validate_counterparty
           if (name === 'validate_counterparty' && req._tier === 'free' && !result.error) {
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-            const used = freeTierUsage.get(ip) || 0;
+            const used = freeTierUsage.get(getMonthKey(ip)) || 0;
             const remaining = FREE_TIER_LIMIT - used;
             const isWarning = used >= FREE_TIER_WARNING;
             const gated = ['risk_factors', 'positive_indicators', 'recommended_actions', 'risk_summary', 'directors_and_officers', 'sic_codes', 'registered_address', 'accounts_last_filed', 'sanctions_screening_note'];
@@ -821,6 +841,7 @@ setupStdio();
 
 server.listen(PORT, () => {
   loadStats();
+  loadApiKeys();
   console.log('Counterparty Validator MCP v' + VERSION + ' running on port ' + PORT);
   console.log('Tools: 2 (validate_counterparty, screen_counterparty)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
