@@ -28,6 +28,13 @@ function loadStats() {
 
 function getMonthKey(ip) { return ip + ':' + new Date().toISOString().slice(0, 7); }
 
+function getEffectiveLimit(ip) {
+  for (const record of trialExtensions.values()) {
+    if (record.ip === ip) return FREE_TIER_LIMIT + TRIAL_EXTENSION_CALLS;
+  }
+  return FREE_TIER_LIMIT;
+}
+
 function saveApiKeys() {
   try { fs.writeFileSync(API_KEYS_FILE, JSON.stringify(Array.from(apiKeys.entries()))); } catch(e) { console.error('API keys save error:', e.message); }
 }
@@ -48,7 +55,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.10';
+const VERSION = '4.10.11';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 
@@ -797,9 +804,10 @@ const server = http.createServer(async (req, res) => {
             const used = freeTierUsage.get(getMonthKey(ip)) || 0;
             const remaining = FREE_TIER_LIMIT - used;
             const isWarning = used >= FREE_TIER_WARNING;
+            const effectiveLimit = getEffectiveLimit(ip);
             const gated = ['risk_factors', 'positive_indicators', 'recommended_actions', 'risk_summary', 'directors_and_officers', 'sic_codes', 'registered_address', 'accounts_last_filed', 'sanctions_screening_note'];
             gated.forEach(f => delete result[f]);
-            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + FREE_TIER_LIMIT + ' calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire. Includes full risk factors, officer list, recommended actions, and sanctions screening.';
+            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + effectiveLimit + ' calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire. Includes full risk factors, officer list, recommended actions, and sanctions screening.';
             result._gated_fields = gated;
             if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.';
           }

@@ -5,6 +5,11 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.11 — 2026-05-05
+
+### Fixed
+- `_upgrade_note` denominator now reflects effective limit (30) after a trial extension is granted, not the base limit (20)
+
 ## v4.10.10 — 2026-05-05
 
 ### Fixed
