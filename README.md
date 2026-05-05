@@ -28,6 +28,49 @@ npx -y @smithery/cli@latest mcp add OjasKord/bizfile-mcp
 
 No API key needed for the first 20 calls/month.
 
+## Harness Integration
+
+### Claude Code / Claude Desktop (.mcp.json)
+```json
+{
+  "mcpServers": {
+    "bizfile": {
+      "type": "http",
+      "url": "https://bizfile-mcp-production.up.railway.app"
+    }
+  }
+}
+```
+
+### LangChain (Python)
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient({
+    "bizfile": {
+        "url": "https://bizfile-mcp-production.up.railway.app",
+        "transport": "http"
+    }
+})
+tools = await client.get_tools()
+```
+
+### OpenAI Agents SDK (Python)
+```python
+from agents import Agent, HostedMCPTool
+agent = Agent(
+    name="Assistant",
+    tools=[HostedMCPTool(tool_config={
+        "type": "mcp",
+        "server_label": "bizfile",
+        "server_url": "https://bizfile-mcp-production.up.railway.app",
+        "require_approval": "never"
+    })]
+)
+```
+
+### LangGraph
+Same as LangChain above — langchain-mcp-adapters works with LangGraph natively.
+
 ## Why Use This
 
 Before your agent signs a contract, makes a payment, onboards a supplier, or enters any B2B relationship — it should verify the counterparty is real, active, and not on a sanctions list. Scammers use dissolved companies, shell companies, and names similar to legitimate businesses. One check takes 2 seconds. Missing it can cost thousands.
