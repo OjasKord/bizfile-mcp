@@ -5,6 +5,11 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.10 — 2026-05-05
+
+### Fixed
+- Free tier gate now only applies to tool calls, not discovery requests (tools/list, resources/list, prompts/list no longer consume free tier quota)
+
 ## v4.10.5 — 2026-04-28
 
 ### Changed

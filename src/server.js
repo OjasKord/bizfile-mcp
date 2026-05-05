@@ -8,7 +8,7 @@ const API_KEYS_FILE = '/tmp/bizfile_apikeys.json';
 
 function saveStats() {
   try {
-    const data = { freeTierUsage: Array.from(freeTierUsage.entries()), usageLog: usageLog.slice(-1000) };
+    const data = { freeTierUsage: Array.from(freeTierUsage.entries()), usageLog: usageLog.slice(-1000), toolUsageCounts, trialExtensions: Array.from(trialExtensions.entries()) };
     fs.writeFileSync(PERSIST_FILE, JSON.stringify(data));
   } catch(e) { console.error('Stats save error:', e.message); }
 }
@@ -19,7 +19,9 @@ function loadStats() {
       const data = JSON.parse(fs.readFileSync(PERSIST_FILE, 'utf8'));
       if (data.freeTierUsage) data.freeTierUsage.forEach(([k, v]) => freeTierUsage.set(k, v));
       if (data.usageLog) usageLog.push(...data.usageLog);
-      console.log('Stats loaded: ' + freeTierUsage.size + ' IPs, ' + usageLog.length + ' calls');
+      if (data.toolUsageCounts) Object.assign(toolUsageCounts, data.toolUsageCounts);
+      if (data.trialExtensions) data.trialExtensions.forEach(([k, v]) => trialExtensions.set(k, v));
+      console.log('Stats loaded: ' + freeTierUsage.size + ' IPs, ' + usageLog.length + ' calls, ' + trialExtensions.size + ' trial extensions');
     }
   } catch(e) { console.error('Stats load error:', e.message); }
 }
@@ -46,7 +48,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.8';
+const VERSION = '4.10.10';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 
@@ -56,6 +58,9 @@ const FREE_TIER_LIMIT = 20;
 const FREE_TIER_WARNING = 16; // warn at 80% usage
 const apiKeys = new Map();
 const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
+const toolUsageCounts = {};
+const trialExtensions = new Map();
+const TRIAL_EXTENSION_CALLS = 10;
 const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
 const SANCTIONS_PRICE = { pro: 0.15, enterprise: 0.125 };
 
@@ -501,7 +506,7 @@ function checkAccess(req) {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const monthKey = getMonthKey(ip);
   const calls = freeTierUsage.get(monthKey) || 0;
-  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit reached. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.', upgrade_url: PRO_UPGRADE_URL, tier: 'free_limit_reached' };
+  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' calls/month reached. Option 1: POST /trial-extension with {"name":"...","email":"...","use_case":"..."} for 10 extra free calls. Option 2: Upgrade at ' + PRO_UPGRADE_URL + ' (500 calls, never expire).', upgrade_url: PRO_UPGRADE_URL, trial_extension: { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } }, tier: 'free_limit_reached' };
   freeTierUsage.set(monthKey, calls + 1);
   saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
@@ -620,12 +625,35 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/stats' && req.method === 'GET') {
     if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
-    const toolCounts = {};
-    usageLog.forEach(e => { toolCounts[e.tool] = (toolCounts[e.tool] || 0) + 1; });
     const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
-    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     const freeUniqueIPs = new Set(Array.from(freeTierUsage.keys()).map(k => k.split(':')[0])).size;
-    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolCounts, recent_calls: usageLog.slice(-20).reverse() }));
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolUsageCounts, recent_calls: usageLog.slice(-20).reverse(), trial_extensions_granted: trialExtensions.size }));
+    return;
+  }
+
+  if (req.url === '/trial-extension' && req.method === 'POST') {
+    let body = ''; req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { name, email, use_case } = JSON.parse(body);
+        if (!name || !email) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'name and email are required', agent_action: 'PROVIDE_REQUIRED_FIELDS' })); return; }
+        const emailKey = 'trial:' + email.toLowerCase().trim();
+        if (trialExtensions.has(emailKey)) { res.writeHead(409, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Trial extension already granted for this email.', upgrade_url: PRO_UPGRADE_URL, agent_action: 'INFORM_USER_TRIAL_ALREADY_USED' })); return; }
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const monthKey = getMonthKey(ip);
+        const currentCalls = freeTierUsage.get(monthKey) || 0;
+        freeTierUsage.set(monthKey, Math.max(0, currentCalls - TRIAL_EXTENSION_CALLS));
+        trialExtensions.set(emailKey, { name, email, use_case: use_case || '', ip, granted_at: nowISO() });
+        saveStats();
+        await sendEmail('ojas@kordagencies.com', 'Bizfile MCP -- Trial Extension: ' + name,
+          '<p><b>Name:</b> ' + name + '<br><b>Email:</b> ' + email + '<br><b>Use case:</b> ' + (use_case || 'Not provided') + '<br><b>IP:</b> ' + ip + '<br><b>Calls granted:</b> ' + TRIAL_EXTENSION_CALLS + '</p>');
+        await sendEmail(email, TRIAL_EXTENSION_CALLS + ' extra free calls added -- Bizfile MCP',
+          '<p>Hi ' + name + ',</p><p>Your ' + TRIAL_EXTENSION_CALLS + ' extra free calls have been added. You can keep using Bizfile MCP right now -- no action needed.</p><p>When you need more, Pro is $20/month for 500 calls (never expire): ' + PRO_UPGRADE_URL + '</p><p>Ojas<br>kordagencies.com</p>');
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ granted: true, additional_calls: TRIAL_EXTENSION_CALLS, message: TRIAL_EXTENSION_CALLS + ' extra free calls added. Check your email for confirmation.', upgrade_url: PRO_UPGRADE_URL }));
+      } catch(e) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message, agent_action: 'RETRY_IN_2_MIN' })); }
+    });
     return;
   }
 
@@ -693,6 +721,7 @@ const server = http.createServer(async (req, res) => {
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
             usageLog.push({ tool: name, tier: access.tier, time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
             if (usageLog.length > 1000) usageLog.shift();
+            toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
             saveStats();
             const result = await executeTool(name, args || {});
             response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
@@ -717,8 +746,8 @@ const server = http.createServer(async (req, res) => {
         const request = JSON.parse(body);
         let sanctionsMeta = null;
 
-        if (request.method !== 'initialize' && request.method !== 'notifications/initialized') {
-          const toolName = request.method === 'tools/call' ? request.params?.name : null;
+        if (request.method === 'tools/call') {
+          const toolName = request.params?.name;
           if (toolName === 'screen_counterparty') {
             const sanctionsAccess = checkSanctionsAccess(req);
             if (!sanctionsAccess.allowed) {
@@ -756,6 +785,7 @@ const server = http.createServer(async (req, res) => {
           const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
           usageLog.push({ tool: name, tier: req._tier || (sanctionsMeta ? sanctionsMeta.plan : 'paid'), time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
           if (usageLog.length > 1000) usageLog.shift();
+          toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
           saveStats();
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
