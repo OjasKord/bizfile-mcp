@@ -5,6 +5,11 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.12 — 2026-05-06
+
+### Added
+- Dashboard: add document-integrity-validator-mcp panel (9th server).
+
 ## v4.10.11 — 2026-05-05
 
 ### Fixed
