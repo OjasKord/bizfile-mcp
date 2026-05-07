@@ -121,6 +121,40 @@ Sanctions screening across 328 global lists via OpenSanctions API (api.opensanct
 
 Cost: GBP 0.15/check (Pro), GBP 0.125/check (Enterprise). Cap: 500/month Pro, 2,000/month Enterprise.
 
+## Add to Your Agent
+
+### Claude Code / Claude Desktop (.mcp.json)
+```json
+{
+  "mcpServers": {
+    "bizfile": {
+      "type": "sse",
+      "url": "https://bizfile-mcp-production.up.railway.app/sse"
+    }
+  }
+}
+```
+
+### LangChain / LangGraph (Python)
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient({
+    "bizfile": {
+        "url": "https://bizfile-mcp-production.up.railway.app/sse",
+        "transport": "sse"
+    }
+})
+tools = await client.get_tools()
+```
+
+### OpenAI Agents SDK (Python)
+```python
+from agents.mcp import MCPServerSse
+mcp_server = MCPServerSse(
+    params={"url": "https://bizfile-mcp-production.up.railway.app/sse"}
+)
+```
+
 ## Example Responses
 
 **check_company_risk:**

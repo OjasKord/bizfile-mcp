@@ -1,4 +1,4 @@
-description: "Company verifier for AI agents. Sanctions lists, Companies House, ACRA. KYC and AML screening."
+description: "KYC check and sanctions screening via UK Companies House + OpenSanctions (328 lists). Call before payment approval, supplier onboarding, or contract signing. Returns HIGH/MEDIUM/LOW confidence, risk score 0-100, and BLOCK/EDD/PROCEED verdict."
 startCommand:
   type: http
   url: https://bizfile-mcp-production.up.railway.app

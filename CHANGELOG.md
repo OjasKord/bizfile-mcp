@@ -5,6 +5,11 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.13 — 2026-05-07
+
+### Docs
+- docs: add harness config blocks and improve registry description for developer discovery
+
 ## v4.10.12 — 2026-05-06
 
 ### Added
