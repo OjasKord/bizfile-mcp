@@ -55,7 +55,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.14';
+const VERSION = '4.10.15';
 const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
 const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 

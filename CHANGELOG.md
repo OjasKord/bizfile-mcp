@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.15 — 2026-05-08
+
+version bump: publish 4.10.15 to npm with discovery rewrite changes.
+
 ## v4.10.14 — 2026-05-08
 
 discovery rewrite: tool descriptions rewritten with workflow triggers and consequence framing. README rewritten with AI engine search terms. smithery.yaml description updated.
