@@ -3,7 +3,7 @@
   "name": "io.github.OjasKord/bizfile-mcp",
   "title": "Bizfile MCP",
   "description": "Company intelligence and sanctions screening across 130+ jurisdictions and 328 sanctions lists.",
-  "version": "4.10.13",
+  "version": "4.10.14",
   "websiteUrl": "https://kordagencies.com",
   "repository": {
     "url": "https://github.com/OjasKord/bizfile-mcp",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "bizfile-mcp",
-      "version": "4.10.13",
+      "version": "4.10.14",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         { "name": "ANTHROPIC_API_KEY", "description": "Anthropic API key for AI-powered risk scoring", "isRequired": true, "isSecret": true }
