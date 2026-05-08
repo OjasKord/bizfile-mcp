@@ -2,9 +2,10 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
+const Stripe = require('stripe');
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const PERSIST_FILE = '/tmp/bizfile_stats.json';
-const API_KEYS_FILE = '/tmp/bizfile_apikeys.json';
 
 function saveStats() {
   try {
@@ -35,18 +36,62 @@ function getEffectiveLimit(ip) {
   return FREE_TIER_LIMIT;
 }
 
-function saveApiKeys() {
-  try { fs.writeFileSync(API_KEYS_FILE, JSON.stringify(Array.from(apiKeys.entries()))); } catch(e) { console.error('API keys save error:', e.message); }
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+async function redisGet(key) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/get/${encodeURIComponent(key)}`,
+      { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    if (!data.result) return null;
+    return JSON.parse(data.result);
+  } catch(e) { return null; }
 }
 
-function loadApiKeys() {
+async function redisSet(key, value) {
   try {
-    if (fs.existsSync(API_KEYS_FILE)) {
-      const entries = JSON.parse(fs.readFileSync(API_KEYS_FILE, 'utf8'));
-      entries.forEach(([k, v]) => apiKeys.set(k, v));
-      console.log('API keys loaded: ' + apiKeys.size + ' keys');
+    await fetch(
+      `${UPSTASH_URL}/set/${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${UPSTASH_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ value: JSON.stringify(value) })
+      }
+    );
+  } catch(e) {}
+}
+
+async function redisKeys(pattern) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/keys/${encodeURIComponent(pattern)}`,
+      { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    return data.result || [];
+  } catch(e) { return []; }
+}
+
+async function saveKeyToRedis(apiKey, record, prefix) {
+  await redisSet(`${prefix}:key:${apiKey}`, record);
+}
+
+async function loadApiKeysFromRedis(prefix) {
+  const keys = await redisKeys(`${prefix}:key:*`);
+  for (const redisKey of keys) {
+    const record = await redisGet(redisKey);
+    if (record) {
+      const apiKey = redisKey.replace(`${prefix}:key:`, '');
+      apiKeys.set(apiKey, record);
     }
-  } catch(e) { console.error('API keys load error:', e.message); }
+  }
+  console.log(`Loaded ${apiKeys.size} API keys from Redis`);
 }
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -55,21 +100,22 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.15';
-const PRO_UPGRADE_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
-const ENTERPRISE_UPGRADE_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
+const VERSION = '4.10.16';
+const REDIS_PREFIX = 'bizfile';
+const FREE_TIER_LIMIT = 20;
+const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
+const BUNDLE_500_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
+const BUNDLE_2000_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
 
 const freeTierUsage = new Map();
 const usageLog = [];
-const FREE_TIER_LIMIT = 20;
-const FREE_TIER_WARNING = 16; // warn at 80% usage
+const FREE_TIER_WARNING = 16;
 const apiKeys = new Map();
-const PLAN_LIMITS = { pro: 10000, enterprise: Infinity };
 const toolUsageCounts = {};
 const trialExtensions = new Map();
 const TRIAL_EXTENSION_CALLS = 10;
-const SANCTIONS_LIMITS = { pro: 500, enterprise: 2000 };
-const SANCTIONS_PRICE = { pro: 0.15, enterprise: 0.125 };
+const SANCTIONS_LIMITS = { bundle_500: 500, bundle_2000: 2000, metered: Infinity };
+const SANCTIONS_PRICE = { bundle_500: 0.15, bundle_2000: 0.125, metered: 0.50 };
 
 const LEGAL_DISCLAIMER = 'Results are sourced directly from official government registries (UK Companies House, Singapore ACRA, US SEC EDGAR) and the OpenSanctions database (api.opensanctions.org) covering 328 global sanctions lists. We do not log or store your query content. Results are for informational purposes only and do not constitute a legal determination of company status or sanctions clearance. Operator must independently verify all results before making compliance decisions. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
 
@@ -78,9 +124,38 @@ const DASHBOARD_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta chars
 function nowISO() { return new Date().toISOString(); }
 function generateApiKey() { return 'biz_' + crypto.randomBytes(24).toString('hex'); }
 function getPlanFromProduct(productName) {
-  if (!productName) return 'pro';
-  if (productName.toLowerCase().includes('enterprise')) return 'enterprise';
-  return 'pro';
+  if (!productName) return 'bundle_500';
+  const n = productName.toLowerCase();
+  if (n.includes('metered') || n.includes('pay as you go') || n === 'metered') return 'metered';
+  if (n.includes('2000') || n.includes('2,000') || n.includes('enterprise')) return 'bundle_2000';
+  return 'bundle_500';
+}
+
+function checkAndResetPeriod(record) {
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+  if (Date.now() - record.periodStart > thirtyDays) {
+    record.calls = 0;
+    if (record.sanctionsChecks !== undefined) {
+      record.sanctionsChecks = 0;
+    }
+    record.periodStart = Date.now();
+    return true;
+  }
+  return false;
+}
+
+async function reportMeteredUsage(customerId, eventName) {
+  try {
+    await stripe.billing.meterEvents.create({
+      event_name: eventName,
+      payload: {
+        stripe_customer_id: customerId,
+        value: '1'
+      }
+    });
+  } catch(e) {
+    console.error('Stripe metered usage report failed:', e.message);
+  }
 }
 
 async function sendEmail(to, subject, html) {
@@ -96,12 +171,10 @@ async function sendEmail(to, subject, html) {
 }
 
 async function sendApiKeyEmail(email, apiKey, plan) {
-  const planLabel = plan === 'enterprise' ? 'Enterprise' : 'Pro';
-  const limit = plan === 'enterprise' ? 'Unlimited' : '10,000';
-  const sanctionsLimit = plan === 'enterprise' ? '2,000' : '500';
-  const sanctionsPrice = plan === 'enterprise' ? 'GBP 0.125' : 'GBP 0.15';
-  const html = '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Counterparty Validator MCP - ' + planLabel + ' Plan</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all">' + apiKey + '</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">MCP Config</div><div style="color:#86EFAC;font-size:12px">{"bizfile":{"url":"https://bizfile-mcp-production.up.railway.app","headers":{"x-api-key":"' + apiKey + '"}}}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#E8EDF5;font-size:13px">Plan: ' + planLabel + ' | Calls: ' + limit + '/month<br>Sanctions: ' + sanctionsPrice + '/check (max ' + sanctionsLimit + '/month)</div></div><div style="background:#0D1219;border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">Results are for informational purposes only. We do not log your query content. Verify all results independently. Liability capped at 3 months fees. Full terms: kordagencies.com/terms.html</div><p style="color:#5A6478;font-size:12px">Questions? ojas@kordagencies.com</p></div></body></html>';
-  return sendEmail(email, 'Your Counterparty Validator MCP ' + planLabel + ' API Key', html);
+  const planLabel = plan === 'metered' ? 'Pay-as-you-go' : plan === 'bundle_2000' ? 'Bundle 2000' : 'Bundle 500';
+  const limitNote = plan === 'metered' ? 'Pay only for what you use — billed monthly' : plan === 'bundle_2000' ? '2,000 calls included' : '500 calls included';
+  const html = '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto"><div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px"><div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:24px">Bizfile MCP - ' + planLabel + '</div><h1 style="font-size:24px;font-weight:700;margin-bottom:8px;color:#FFFFFF">Your API key is ready.</h1><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">Your API Key</div><div style="color:#00E5C3;font-size:14px;word-break:break-all">' + apiKey + '</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#5A6478;font-size:11px;text-transform:uppercase;margin-bottom:8px">MCP Config</div><div style="color:#86EFAC;font-size:12px">{"bizfile":{"url":"https://bizfile-mcp-production.up.railway.app","headers":{"x-api-key":"' + apiKey + '"}}}</div></div><div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:20px;margin-bottom:24px"><div style="color:#E8EDF5;font-size:13px">Plan: ' + planLabel + '<br>' + limitNote + '</div></div><div style="background:#0D1219;border-radius:6px;padding:16px;margin-bottom:24px;font-size:11px;color:#5A6478;line-height:1.7">Results are for informational purposes only. We do not log your query content. Verify all results independently. Liability capped at 3 months fees. Full terms: kordagencies.com/terms.html</div><p style="color:#5A6478;font-size:12px">Questions? ojas@kordagencies.com</p></div></body></html>';
+  return sendEmail(email, 'Your Bizfile MCP API Key — ' + planLabel, html);
 }
 
 async function callClaude(prompt) {
@@ -505,32 +578,105 @@ function checkAccess(req) {
   const apiKey = req.headers['x-api-key'];
   if (apiKey) {
     const record = apiKeys.get(apiKey);
-    if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com', tier: 'invalid' };
-    if (record.limit !== Infinity && record.calls >= record.limit) return { allowed: false, reason: 'Monthly limit of ' + record.limit + ' calls reached. Upgrade at kordagencies.com', tier: 'limit_reached' };
+    if (!record) {
+      return { allowed: false, error: 'Invalid API key' };
+    }
+
+    const wasReset = checkAndResetPeriod(record);
+    if (wasReset) {
+      saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
+    }
+
+    if (record.plan === 'metered') {
+      record.calls++;
+      saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
+      return {
+        allowed: true,
+        paid: true,
+        plan: 'metered',
+        stripeCustomerId: record.stripeCustomerId
+      };
+    }
+
+    if (record.calls >= record.limit) {
+      return {
+        allowed: false,
+        error: `Bundle exhausted. You have used all ${record.limit} calls in this bundle. Purchase another bundle or switch to pay-as-you-go.`,
+        subscribe_url: METERED_SUBSCRIBE_URL,
+        bundle_500_url: BUNDLE_500_URL,
+        bundle_2000_url: BUNDLE_2000_URL,
+        agent_action: 'PAUSE_AND_NOTIFY_USER'
+      };
+    }
+
     record.calls++;
-    return { allowed: true, tier: record.plan, record, key: apiKey };
+    saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
+    return { allowed: true, paid: true, plan: record.plan };
   }
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const monthKey = getMonthKey(ip);
   const calls = freeTierUsage.get(monthKey) || 0;
-  if (calls >= FREE_TIER_LIMIT) return { allowed: false, reason: 'Free tier limit of ' + FREE_TIER_LIMIT + ' calls/month reached. Option 1: POST /trial-extension with {"name":"...","email":"...","use_case":"..."} for 10 extra free calls. Option 2: Upgrade at ' + PRO_UPGRADE_URL + ' (500 calls, never expire).', upgrade_url: PRO_UPGRADE_URL, trial_extension: { endpoint: '/trial-extension', method: 'POST', body: { name: 'string', email: 'string', use_case: 'string' } }, tier: 'free_limit_reached' };
+  if (calls >= FREE_TIER_LIMIT) return {
+    allowed: false,
+    error: 'Free tier limit of 20 calls/month reached.',
+    options: {
+      pay_as_you_go: {
+        description: 'No commitment. Pay only for what you use. Billed monthly at end of period.',
+        pricing: {
+          registry_check: '$0.019 per query',
+          lite_registry_check: '$0.008 per query',
+          sanctions_screening: '$0.50 per screen'
+        },
+        subscribe_url: METERED_SUBSCRIBE_URL
+      },
+      bundle: {
+        description: 'Buy a fixed call bundle. No subscription.',
+        options: [
+          { calls: 500, price: '$20', url: BUNDLE_500_URL },
+          { calls: 2000, price: '$70', url: BUNDLE_2000_URL }
+        ]
+      }
+    },
+    agent_action: 'PAUSE_AND_NOTIFY_USER'
+  };
   freeTierUsage.set(monthKey, calls + 1);
   saveStats();
   const remaining = FREE_TIER_LIMIT - calls - 1;
-  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' : null };
+  return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining this month. Get 500 calls for $20 at ' + BUNDLE_500_URL + ' -- calls never expire.' : null };
 }
 
 function checkSanctionsAccess(req) {
   const apiKey = req.headers['x-api-key'];
-  if (!apiKey) return { allowed: false, reason: 'Sanctions screening requires a paid API key. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' };
+  if (!apiKey) return {
+    allowed: false,
+    error: 'Sanctions screening requires a paid API key.',
+    options: {
+      pay_as_you_go: { subscribe_url: METERED_SUBSCRIBE_URL },
+      bundle: { options: [{ calls: 500, price: '$20', url: BUNDLE_500_URL }, { calls: 2000, price: '$70', url: BUNDLE_2000_URL }] }
+    },
+    agent_action: 'PAUSE_AND_NOTIFY_USER'
+  };
   const record = apiKeys.get(apiKey);
-  if (!record) return { allowed: false, reason: 'Invalid API key. Get yours at kordagencies.com' };
+  if (!record) return { allowed: false, error: 'Invalid API key' };
+
+  const wasReset = checkAndResetPeriod(record);
+  if (wasReset) {
+    saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
+  }
+
+  if (record.plan === 'metered') {
+    record.calls++;
+    saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
+    return { allowed: true, plan: 'metered', stripeCustomerId: record.stripeCustomerId };
+  }
+
   const limit = SANCTIONS_LIMITS[record.plan] || 500;
   const used = record.sanctionsChecks || 0;
-  if (used >= limit) return { allowed: false, reason: 'Sanctions screening limit of ' + limit + ' checks/month reached. Contact ojas@kordagencies.com to discuss higher limits.', checks_used: used, checks_limit: limit };
+  if (used >= limit) return { allowed: false, error: 'Sanctions screening limit of ' + limit + ' checks/period reached. Contact ojas@kordagencies.com to discuss higher limits.', checks_used: used, checks_limit: limit };
   record.sanctionsChecks = used + 1;
+  saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
   const price = SANCTIONS_PRICE[record.plan] || 0.15;
-  return { allowed: true, checks_used: used + 1, checks_remaining: limit - used - 1, checks_limit: limit, cost_this_call: 'GBP ' + price.toFixed(3), plan: record.plan };
+  return { allowed: true, checks_used: used + 1, checks_remaining: limit - used - 1, checks_limit: limit, cost_this_call: 'USD ' + price.toFixed(3), plan: record.plan };
 }
 
 // ─── STRIPE WEBHOOK ───────────────────────────────────────────────────────────
@@ -567,16 +713,36 @@ async function handleStripeWebhook(body, sig) {
     const event = JSON.parse(body);
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const email = session.customer_email || session.customer_details?.email;
-      const plan = getPlanFromProduct(session.metadata?.product_name || '');
-      if (email) {
-        const apiKey = generateApiKey();
-        apiKeys.set(apiKey, { email, plan, createdAt: new Date().toISOString(), calls: 0, limit: PLAN_LIMITS[plan], sanctionsChecks: 0 });
-        saveApiKeys();
-        await sendApiKeyEmail(email, apiKey, plan);
-        console.log('[bizfile] API key created for ' + email + ' (' + plan + ')');
-        return { success: true, email, plan };
+      const plan = getPlanFromProduct(session.metadata?.product_name);
+      const apiKey = generateApiKey();
+      const limit = plan === 'metered' ? null : plan === 'bundle_2000' ? 2000 : 500;
+      const record = {
+        email: session.customer_details?.email || 'unknown',
+        plan,
+        calls: 0,
+        periodStart: Date.now(),
+        limit,
+        stripeCustomerId: session.customer || null,
+        sanctionsChecks: 0,
+        createdAt: Date.now()
+      };
+      apiKeys.set(apiKey, record);
+      await saveKeyToRedis(apiKey, record, REDIS_PREFIX);
+      await sendApiKeyEmail(record.email, apiKey, plan);
+      console.log('[bizfile] API key created for ' + record.email + ' (' + plan + ')');
+      return { success: true, email: record.email, plan };
+    }
+    if (event.type === 'customer.subscription.created') {
+      const sub = event.data.object;
+      const customerId = sub.customer;
+      for (const [key, record] of apiKeys.entries()) {
+        if (record.stripeCustomerId === customerId && !record.subscriptionId) {
+          record.subscriptionId = sub.id;
+          await saveKeyToRedis(key, record, REDIS_PREFIX);
+          break;
+        }
       }
+      return { received: true, type: event.type };
     }
     return { received: true, type: event.type };
   } catch(e) { console.error('[bizfile] Webhook error:', e.message); return { error: e.message, status: 400 }; }
@@ -656,9 +822,9 @@ const server = http.createServer(async (req, res) => {
         await sendEmail('ojas@kordagencies.com', 'Bizfile MCP -- Trial Extension: ' + name,
           '<p><b>Name:</b> ' + name + '<br><b>Email:</b> ' + email + '<br><b>Use case:</b> ' + (use_case || 'Not provided') + '<br><b>IP:</b> ' + ip + '<br><b>Calls granted:</b> ' + TRIAL_EXTENSION_CALLS + '</p>');
         await sendEmail(email, TRIAL_EXTENSION_CALLS + ' extra free calls added -- Bizfile MCP',
-          '<p>Hi ' + name + ',</p><p>Your ' + TRIAL_EXTENSION_CALLS + ' extra free calls have been added. You can keep using Bizfile MCP right now -- no action needed.</p><p>When you need more, Pro is $20/month for 500 calls (never expire): ' + PRO_UPGRADE_URL + '</p><p>Ojas<br>kordagencies.com</p>');
+          '<p>Hi ' + name + ',</p><p>Your ' + TRIAL_EXTENSION_CALLS + ' extra free calls have been added. You can keep using Bizfile MCP right now -- no action needed.</p><p>When you need more, get 500 calls for $20: ' + BUNDLE_500_URL + '</p><p>Ojas<br>kordagencies.com</p>');
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ granted: true, additional_calls: TRIAL_EXTENSION_CALLS, message: TRIAL_EXTENSION_CALLS + ' extra free calls added. Check your email for confirmation.', upgrade_url: PRO_UPGRADE_URL }));
+        res.end(JSON.stringify({ granted: true, additional_calls: TRIAL_EXTENSION_CALLS, message: TRIAL_EXTENSION_CALLS + ' extra free calls added. Check your email for confirmation.', bundle_url: BUNDLE_500_URL }));
       } catch(e) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message, agent_action: 'RETRY_IN_2_MIN' })); }
     });
     return;
@@ -722,15 +888,19 @@ const server = http.createServer(async (req, res) => {
         } else if (request.method === 'tools/call') {
           const access = checkAccess(req);
           if (!access.allowed) {
-            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: PRO_UPGRADE_URL, agent_action: 'Inform user free tier quota is exhausted. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' } };
+            response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.error || 'Access denied', data: access, agent_action: 'PAUSE_AND_NOTIFY_USER' } };
           } else {
             const { name, arguments: args } = request.params;
             const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-            usageLog.push({ tool: name, tier: access.tier, time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
+            usageLog.push({ tool: name, tier: access.tier || access.plan || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
             if (usageLog.length > 1000) usageLog.shift();
             toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
             saveStats();
             const result = await executeTool(name, args || {});
+            if (access.plan === 'metered' && access.stripeCustomerId) {
+              const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
+              reportMeteredUsage(access.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
+            }
             response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
           }
         } else {
@@ -759,7 +929,7 @@ const server = http.createServer(async (req, res) => {
             const sanctionsAccess = checkSanctionsAccess(req);
             if (!sanctionsAccess.allowed) {
               res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.reason, agent_action: 'Sanctions screening requires a paid API key. Upgrade at kordagencies.com', data: sanctionsAccess } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32002, message: sanctionsAccess.error || 'Access denied', data: sanctionsAccess, agent_action: 'PAUSE_AND_NOTIFY_USER' } }));
               return;
             }
             sanctionsMeta = sanctionsAccess;
@@ -767,11 +937,12 @@ const server = http.createServer(async (req, res) => {
             const access = checkAccess(req);
             if (!access.allowed) {
               res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.reason, upgrade_url: PRO_UPGRADE_URL, agent_action: 'Inform user free tier quota is exhausted. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.' } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.error || 'Access denied', data: access, agent_action: 'PAUSE_AND_NOTIFY_USER' } }));
               return;
             }
             req._accessWarning = access.warning;
             req._tier = access.tier;
+            req._accessResult = access;
           }
         }
 
@@ -796,20 +967,25 @@ const server = http.createServer(async (req, res) => {
           saveStats();
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
-          if (sanctionsMeta) result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
+          if (sanctionsMeta && sanctionsMeta.plan !== 'metered') result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
+
+          const accessResult = req._accessResult || sanctionsMeta;
+          if (accessResult && accessResult.plan === 'metered' && accessResult.stripeCustomerId) {
+            const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
+            reportMeteredUsage(accessResult.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
+          }
 
           // Partial response for free tier on validate_counterparty
           if (name === 'validate_counterparty' && req._tier === 'free' && !result.error) {
-            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
             const used = freeTierUsage.get(getMonthKey(ip)) || 0;
             const remaining = FREE_TIER_LIMIT - used;
             const isWarning = used >= FREE_TIER_WARNING;
             const effectiveLimit = getEffectiveLimit(ip);
             const gated = ['risk_factors', 'positive_indicators', 'recommended_actions', 'risk_summary', 'directors_and_officers', 'sic_codes', 'registered_address', 'accounts_last_filed', 'sanctions_screening_note'];
             gated.forEach(f => delete result[f]);
-            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + effectiveLimit + ' calls remaining this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire. Includes full risk factors, officer list, recommended actions, and sanctions screening.';
+            result._upgrade_note = 'Free tier: ' + remaining + ' of ' + effectiveLimit + ' calls remaining this month. Get 500 calls for $20 at ' + BUNDLE_500_URL + ' — calls never expire. Includes full risk factors, officer list, recommended actions, and sanctions screening.';
             result._gated_fields = gated;
-            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Get 500 calls for $20 at ' + PRO_UPGRADE_URL + ' -- calls never expire.';
+            if (isWarning) result._notice = 'Warning: only ' + remaining + ' free call' + (remaining === 1 ? '' : 's') + ' left this month. Get 500 calls for $20 at ' + BUNDLE_500_URL + ' -- calls never expire.';
           }
 
           response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
@@ -829,7 +1005,58 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', version: VERSION, status: 'ok', tools: 2, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', upgrade: PRO_UPGRADE_URL }));
+    res.end(JSON.stringify({ name: 'bizfile-mcp', version: VERSION, status: 'ok', tools: 3, description: 'Counterparty Validator MCP. validate_counterparty: full registry + AI risk + officers in one call. screen_counterparty: 328 global sanctions lists for company + all directors. Free tier: 20 calls/month.', subscribe_url: METERED_SUBSCRIBE_URL, bundle_500_url: BUNDLE_500_URL, bundle_2000_url: BUNDLE_2000_URL }));
+    return;
+  }
+
+  if (req.url === '/subscribe' && req.method === 'GET') {
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        line_items: [
+          { price: 'price_1TUktYD6WvRe6sn3fyZ1AX4d' },
+          { price: 'price_1TUkvCD6WvRe6sn3QmVHG3TI' },
+          { price: 'price_1TUkwQD6WvRe6sn3w4GanEf3' }
+        ],
+        success_url: 'https://bizfile-mcp-production.up.railway.app/subscribed',
+        cancel_url: 'https://kordagencies.com/bizfile.html',
+        metadata: { product_name: 'metered' }
+      });
+      res.writeHead(302, { Location: session.url });
+      res.end();
+    } catch(e) {
+      res.writeHead(500, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Could not create checkout session', details: e.message }));
+    }
+    return;
+  }
+
+  if (req.url === '/subscribed' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Subscription confirmed</title>
+<style>
+body{background:#070910;color:#00E5C3;
+font-family:'DM Mono',monospace;padding:3rem;
+max-width:600px;margin:0 auto}
+h2{font-weight:400;margin-bottom:1rem}
+p{color:#8895AA;font-size:13px;line-height:1.6;
+margin-bottom:0.8rem}
+a{color:#00E5C3}
+</style>
+</head>
+<body>
+<h2>Subscription confirmed.</h2>
+<p>Your API key will arrive by email within 60 seconds.</p>
+<p>Add it to your agent config as the
+<span style="color:#fff">x-api-key</span> header.</p>
+<p>Full documentation at
+<a href="https://kordagencies.com">kordagencies.com</a></p>
+</body>
+</html>`);
     return;
   }
 
@@ -877,13 +1104,15 @@ function setupStdio() {
 
 setupStdio();
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   loadStats();
-  loadApiKeys();
+  await loadApiKeysFromRedis('bizfile');
   console.log('Counterparty Validator MCP v' + VERSION + ' running on port ' + PORT);
-  console.log('Tools: 2 (validate_counterparty, screen_counterparty)');
+  console.log('Tools: 3 (validate_counterparty, screen_counterparty, validate_counterparty_lite)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');
   console.log('Sanctions screening: ' + (OPENSANCTIONS_API_KEY ? 'enabled' : 'DISABLED - set OPENSANCTIONS_API_KEY'));
   console.log('Resend: ' + (RESEND_API_KEY ? 'configured' : 'MISSING'));
   console.log('Anthropic: ' + (ANTHROPIC_API_KEY ? 'configured' : 'MISSING'));
+  console.log('Upstash Redis: ' + (UPSTASH_URL ? 'configured' : 'MISSING - set UPSTASH_REDIS_REST_URL'));
+  console.log('Stripe: ' + (process.env.STRIPE_SECRET_KEY ? 'configured' : 'MISSING - set STRIPE_SECRET_KEY'));
 });

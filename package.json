@@ -1,7 +1,7 @@
 {
   "name": "bizfile-mcp",
   "mcpName": "io.github.OjasKord/bizfile-mcp",
-  "version": "4.10.15",
+  "version": "4.10.16",
   "description": "Real-time company verification, KYC, and due diligence across 130+ jurisdictions. Search companies, verify identities, assess risk, and get officer data from UK Companies House, Singapore ACRA, and US SEC EDGAR.",
   "main": "src/server.js",
   "scripts": {
@@ -50,6 +50,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@modelcontextprotocol/sdk": "^1.10.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "stripe": "^22.1.1"
   }
 }
