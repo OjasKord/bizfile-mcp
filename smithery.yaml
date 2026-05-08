@@ -1,4 +1,4 @@
-description: "KYC check and sanctions screening via UK Companies House + OpenSanctions (328 lists). Call before payment approval, supplier onboarding, or contract signing. Returns HIGH/MEDIUM/LOW confidence, risk score 0-100, and BLOCK/EDD/PROCEED verdict."
+description: "AI-powered KYC and sanctions screening via UK Companies House, Singapore ACRA, OpenCorporates (210M+ companies, 130+ jurisdictions) and 328 global sanctions lists. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100."
 startCommand:
   type: http
   url: https://bizfile-mcp-production.up.railway.app
