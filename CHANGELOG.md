@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.17 — 2026-05-11
+
+feat: session co-occurrence logging to Redis — tracks tool call sequences per IP per day
+
 ## v4.10.16 — 2026-05-08
 
 billing upgrade: Upstash Redis persistent key storage, monthly period reset, metered billing via Stripe Meter Events API, dual billing options (pay-as-you-go + bundles), /subscribe and /subscribed endpoints, FREE_TIER_LIMIT updated

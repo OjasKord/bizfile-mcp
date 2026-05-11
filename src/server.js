@@ -67,6 +67,25 @@ async function redisSet(key, value) {
   } catch(e) {}
 }
 
+async function redisExpire(key, seconds) {
+  try {
+    await fetch(
+      `${UPSTASH_URL}/expire/${encodeURIComponent(key)}/${seconds}`,
+      { method: 'POST', headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+  } catch(e) {}
+}
+
+async function appendSessionLog(ip, tool) {
+  const ipSafe = ip.replace(/:/g, '_').replace(/\s/g, '');
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const key = `${REDIS_PREFIX}:session:${ipSafe}:${dayKey}`;
+  const existing = await redisGet(key) || [];
+  existing.push({ tool, timestamp: new Date().toISOString() });
+  await redisSet(key, existing);
+  await redisExpire(key, 86400);
+}
+
 async function redisKeys(pattern) {
   try {
     const res = await fetch(
@@ -100,7 +119,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.16';
+const VERSION = '4.10.17';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
@@ -805,6 +824,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/session-log' && req.method === 'GET') {
+    if (req.headers['x-stats-key'] !== STATS_KEY) { res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    (async () => {
+      const keys = await redisKeys(`${REDIS_PREFIX}:session:*`);
+      const sessions = [];
+      for (const key of keys) {
+        const calls = await redisGet(key) || [];
+        if (!calls.length) continue;
+        const withoutPrefix = key.slice(`${REDIS_PREFIX}:session:`.length);
+        const dateIdx = withoutPrefix.lastIndexOf(':');
+        const ipPart = withoutPrefix.slice(0, dateIdx);
+        const date = withoutPrefix.slice(dateIdx + 1);
+        sessions.push({ ip: ipPart.slice(0, 8), date, calls, first_call: calls[0]?.timestamp || '', last_call: calls[calls.length - 1]?.timestamp || '' });
+      }
+      sessions.sort((a, b) => new Date(b.first_call) - new Date(a.first_call));
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sessions));
+    })();
+    return;
+  }
+
   if (req.url === '/trial-extension' && req.method === 'POST') {
     let body = ''; req.on('data', c => body += c);
     req.on('end', async () => {
@@ -896,6 +936,7 @@ const server = http.createServer(async (req, res) => {
             if (usageLog.length > 1000) usageLog.shift();
             toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
             saveStats();
+            appendSessionLog(ip, name).catch(() => {});
             const result = await executeTool(name, args || {});
             if (access.plan === 'metered' && access.stripeCustomerId) {
               const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
@@ -965,6 +1006,7 @@ const server = http.createServer(async (req, res) => {
           if (usageLog.length > 1000) usageLog.shift();
           toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
           saveStats();
+          appendSessionLog(ip, name).catch(() => {});
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
           if (sanctionsMeta && sanctionsMeta.plan !== 'metered') result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
