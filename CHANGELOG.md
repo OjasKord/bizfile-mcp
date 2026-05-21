@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.19 — 2026-05-21
+
+fix: Upstash redisSet corrected to REST GET format, response error logging added to all Redis helpers
+
 ## v4.10.18 — 2026-05-21
 
 fix: session log Redis errors now visible, IP extraction takes first forwarded IP only, startup warning if Upstash env vars missing

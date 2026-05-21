@@ -46,6 +46,7 @@ async function redisGet(key) {
       { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
     );
     const data = await res.json();
+    if (data.error) console.error('[Redis] redisGet error:', data.error, 'key:', key);
     if (!data.result) return null;
     return JSON.parse(data.result);
   } catch(e) { return null; }
@@ -53,26 +54,23 @@ async function redisGet(key) {
 
 async function redisSet(key, value) {
   try {
-    await fetch(
-      `${UPSTASH_URL}/set/${encodeURIComponent(key)}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${UPSTASH_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ value: JSON.stringify(value) })
-      }
-    );
+    const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` }
+    });
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisSet error:', data.error, 'key:', key);
   } catch(e) { console.error('[Redis] redisSet failed:', e); }
 }
 
 async function redisExpire(key, seconds) {
   try {
-    await fetch(
+    const res = await fetch(
       `${UPSTASH_URL}/expire/${encodeURIComponent(key)}/${seconds}`,
       { method: 'POST', headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
     );
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisExpire error:', data.error, 'key:', key);
   } catch(e) { console.error('[Redis] redisExpire failed:', e); }
 }
 
@@ -95,6 +93,7 @@ async function redisKeys(pattern) {
       { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
     );
     const data = await res.json();
+    if (data.error) console.error('[Redis] redisKeys error:', data.error, 'pattern:', pattern);
     return data.result || [];
   } catch(e) { return []; }
 }
@@ -121,7 +120,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.18';
+const VERSION = '4.10.19';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
