@@ -13,5 +13,8 @@ fix.js
 inject_*.js 
 *.txt 
 *.pdf 
-full.txt 
-snippet.txt 
+full.txt
+snippet.txt
+SYSTEM_PROMPT.md
+MCP-*.md
+MCP-Product-Strategy.md
