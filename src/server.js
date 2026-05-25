@@ -120,7 +120,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.19';
+const VERSION = '4.10.21';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
@@ -134,7 +134,7 @@ const apiKeys = new Map();
 const toolUsageCounts = {};
 const trialExtensions = new Map();
 const TRIAL_EXTENSION_CALLS = 10;
-const SANCTIONS_LIMITS = { bundle_500: 500, bundle_2000: 2000, metered: Infinity };
+const SANCTIONS_LIMITS = { bundle_500: 500, bundle_2000: 2000, metered: Infinity, internal: Infinity };
 const SANCTIONS_PRICE = { bundle_500: 0.15, bundle_2000: 0.125, metered: 0.50 };
 
 const LEGAL_DISCLAIMER = 'Results are sourced directly from official government registries (UK Companies House, Singapore ACRA, US SEC EDGAR) and the OpenSanctions database (api.opensanctions.org) covering 328 global sanctions lists. We do not log or store your query content. Results are for informational purposes only and do not constitute a legal determination of company status or sanctions clearance. Operator must independently verify all results before making compliance decisions. Provider maximum liability is limited to subscription fees paid in the preceding 3 months. Full terms: kordagencies.com/terms.html';
@@ -690,7 +690,7 @@ function checkSanctionsAccess(req) {
     return { allowed: true, plan: 'metered', stripeCustomerId: record.stripeCustomerId };
   }
 
-  const limit = SANCTIONS_LIMITS[record.plan] || 500;
+  const limit = SANCTIONS_LIMITS[record.plan] || record.limit || 500;
   const used = record.sanctionsChecks || 0;
   if (used >= limit) return { allowed: false, error: 'Sanctions screening limit of ' + limit + ' checks/period reached. Contact ojas@kordagencies.com to discuss higher limits.', checks_used: used, checks_limit: limit };
   record.sanctionsChecks = used + 1;

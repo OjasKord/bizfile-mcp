@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.21 — 2026-05-25
+
+fix: internal plan added to SANCTIONS_LIMITS, record.limit used as fallback in checkSanctionsAccess
+
 ## v4.10.19 — 2026-05-21
 
 fix: Upstash redisSet corrected to REST GET format, response error logging added to all Redis helpers
