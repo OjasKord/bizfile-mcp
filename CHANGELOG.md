@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.25 — 2026-06-02
+
+feat: tool descriptions rewritten for orchestral agent runtime selection
+
 ## v4.10.24 — 2026-06-02
 
 feat: tool descriptions updated for agentic finance workflows — Robinhood Agentic Trading trigger language added
