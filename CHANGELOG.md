@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.22 — 2026-06-02
+
+improve: free tier limit error message now explains value and workflow context, upgrade options structured, trial extension verified; fixed undefined PRO_UPGRADE_URL in 409 response; added upgrade_url to trial extension success response
+
 ## v4.10.21 — 2026-05-25
 
 fix: internal plan added to SANCTIONS_LIMITS, record.limit used as fallback in checkSanctionsAccess

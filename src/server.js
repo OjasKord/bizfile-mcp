@@ -120,7 +120,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.21';
+const VERSION = '4.10.22';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
@@ -638,26 +638,32 @@ function checkAccess(req) {
   const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) return {
     allowed: false,
-    error: 'Free tier limit of 20 calls/month reached.',
-    options: {
-      pay_as_you_go: {
-        description: 'No commitment. Pay only for what you use. Billed monthly at end of period.',
-        pricing: {
-          registry_check: '$0.019 per query',
-          lite_registry_check: '$0.008 per query',
-          sanctions_screening: '$0.50 per screen'
-        },
-        subscribe_url: METERED_SUBSCRIBE_URL
+    error: 'Free tier limit of 20 calls/month reached. Bizfile MCP has been verifying companies against UK Companies House, Singapore ACRA, and 130+ jurisdictions with AI risk scoring and sanctions screening against 328 global lists. Upgrade to continue this workflow without interruption.',
+    agent_action: 'PAUSE_AND_NOTIFY_USER',
+    upgrade_options: {
+      bundle_500: {
+        calls: 500,
+        price: '$20',
+        url: BUNDLE_500_URL,
+        note: 'Best for evaluation and low-volume workflows'
       },
-      bundle: {
-        description: 'Buy a fixed call bundle. No subscription.',
-        options: [
-          { calls: 500, price: '$20', url: BUNDLE_500_URL },
-          { calls: 2000, price: '$70', url: BUNDLE_2000_URL }
-        ]
+      bundle_2000: {
+        calls: 2000,
+        price: '$70',
+        url: BUNDLE_2000_URL,
+        note: 'Best for production workflows'
+      },
+      pay_as_you_go: {
+        subscribe_url: METERED_SUBSCRIBE_URL,
+        note: 'Metered billing — pay only for what you use'
       }
     },
-    agent_action: 'PAUSE_AND_NOTIFY_USER'
+    trial_extension: {
+      endpoint: '/trial-extension',
+      method: 'POST',
+      body: { name: 'string', email: 'string', use_case: 'string' },
+      note: 'Get 10 additional free calls to complete your evaluation — no payment required'
+    }
   };
   freeTierUsage.set(monthKey, calls + 1);
   saveStats();
@@ -853,7 +859,7 @@ const server = http.createServer(async (req, res) => {
         const { name, email, use_case } = JSON.parse(body);
         if (!name || !email) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'name and email are required', agent_action: 'PROVIDE_REQUIRED_FIELDS' })); return; }
         const emailKey = 'trial:' + email.toLowerCase().trim();
-        if (trialExtensions.has(emailKey)) { res.writeHead(409, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Trial extension already granted for this email.', upgrade_url: PRO_UPGRADE_URL, agent_action: 'INFORM_USER_TRIAL_ALREADY_USED' })); return; }
+        if (trialExtensions.has(emailKey)) { res.writeHead(409, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Trial extension already granted for this email.', upgrade_url: 'https://kordagencies.com', agent_action: 'INFORM_USER_TRIAL_ALREADY_USED' })); return; }
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
         const monthKey = getMonthKey(ip);
         const currentCalls = freeTierUsage.get(monthKey) || 0;
@@ -865,7 +871,7 @@ const server = http.createServer(async (req, res) => {
         await sendEmail(email, TRIAL_EXTENSION_CALLS + ' extra free calls added -- Bizfile MCP',
           '<p>Hi ' + name + ',</p><p>Your ' + TRIAL_EXTENSION_CALLS + ' extra free calls have been added. You can keep using Bizfile MCP right now -- no action needed.</p><p>When you need more, get 500 calls for $20: ' + BUNDLE_500_URL + '</p><p>Ojas<br>kordagencies.com</p>');
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ granted: true, additional_calls: TRIAL_EXTENSION_CALLS, message: TRIAL_EXTENSION_CALLS + ' extra free calls added. Check your email for confirmation.', bundle_url: BUNDLE_500_URL }));
+        res.end(JSON.stringify({ granted: true, additional_calls: TRIAL_EXTENSION_CALLS, message: TRIAL_EXTENSION_CALLS + ' extra free calls added. Check your email for confirmation.', upgrade_url: 'https://kordagencies.com', bundle_url: BUNDLE_500_URL }));
       } catch(e) { res.writeHead(400, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message, agent_action: 'RETRY_IN_2_MIN' })); }
     });
     return;
