@@ -114,14 +114,31 @@ async function loadApiKeysFromRedis(prefix) {
   console.log(`Loaded ${apiKeys.size} API keys from Redis`);
 }
 
+async function loadFreeTierFromRedis() {
+  try {
+    const data = await redisGet(FREE_TIER_REDIS_KEY);
+    if (data && Array.isArray(data)) {
+      data.forEach(([k, v]) => freeTierUsage.set(k, v));
+      console.log('[FreeTier] Loaded ' + freeTierUsage.size + ' IPs from Redis');
+    }
+  } catch(e) { console.error('[FreeTier] load failed:', e); }
+}
+
+async function saveFreeTierToRedis() {
+  try {
+    await redisSet(FREE_TIER_REDIS_KEY, Array.from(freeTierUsage.entries()));
+  } catch(e) { console.error('[FreeTier] save failed:', e); }
+}
+
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.22';
+const VERSION = '4.10.23';
 const REDIS_PREFIX = 'bizfile';
+const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
 const BUNDLE_500_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
@@ -633,7 +650,8 @@ function checkAccess(req) {
     saveKeyToRedis(apiKey, record, REDIS_PREFIX).catch(() => {});
     return { allowed: true, paid: true, plan: record.plan };
   }
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const ip = rawIp.split(',')[0].trim();
   const monthKey = getMonthKey(ip);
   const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) return {
@@ -667,6 +685,7 @@ function checkAccess(req) {
   };
   freeTierUsage.set(monthKey, calls + 1);
   saveStats();
+  saveFreeTierToRedis().catch(() => {});
   const remaining = FREE_TIER_LIMIT - calls - 1;
   return { allowed: true, tier: 'free', remaining, warning: remaining < 5 ? remaining + ' free calls remaining this month. Get 500 calls for $20 at ' + BUNDLE_500_URL + ' -- calls never expire.' : null };
 }
@@ -1162,6 +1181,7 @@ if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN
 server.listen(PORT, async () => {
   loadStats();
   await loadApiKeysFromRedis('bizfile');
+  await loadFreeTierFromRedis();
   console.log('Counterparty Validator MCP v' + VERSION + ' running on port ' + PORT);
   console.log('Tools: 3 (validate_counterparty, screen_counterparty, validate_counterparty_lite)');
   console.log('Free tier: ' + FREE_TIER_LIMIT + ' calls/IP, no API key required');

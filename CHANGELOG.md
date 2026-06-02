@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.23 — 2026-06-02
+
+fix: free tier usage persisted in Redis (survives redeploys), IP extraction fixed for Cloudflare proxy headers
+
 ## v4.10.22 — 2026-06-02
 
 improve: free tier limit error message now explains value and workflow context, upgrade options structured, trial extension verified; fixed undefined PRO_UPGRADE_URL in 409 response; added upgrade_url to trial extension success response
