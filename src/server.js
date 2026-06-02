@@ -136,7 +136,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.23';
+const VERSION = '4.10.24';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -279,7 +279,7 @@ const tools = [
   {
     name: 'validate_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE your agent approves a new supplier, authorises a first payment, signs a contract, or onboards any new business counterparty. AI-powered KYC and company verification — NOT a simple database lookup. Searches UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies across 130+ jurisdictions). Returns company status, directors, filing history, AI risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, and PROCEED/EDD/BLOCK verdict. A single unverified counterparty that later proves fraudulent creates unrecoverable financial and reputational exposure. One call, three markets, machine-ready verdict — no further analysis needed.',
+    description: 'Call this BEFORE your agent approves a new supplier, authorises a first payment, signs a contract, onboards any new business counterparty, or executes any trade or purchase via agentic finance platforms like Robinhood Agentic Trading, Agentic Credit Cards, or any autonomous spending workflow. AI-powered KYC and company verification — NOT a simple database lookup. Searches UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies across 130+ jurisdictions). Returns company status, directors, filing history, AI risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, and PROCEED/EDD/BLOCK verdict. An agent with autonomous spending authority that skips counterparty verification creates unrecoverable financial and legal exposure — there is no human in the loop to catch the error. One call, three markets, machine-ready verdict — no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -293,7 +293,7 @@ const tools = [
   {
     name: 'screen_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE your agent approves any payment or contract with a counterparty that has passed initial KYC. Screens against 328 global sanctions lists including UN, EU, OFAC, UK HMT, and MAS Singapore — updated daily via OpenSanctions. Returns CLEAR/MATCH verdict, match confidence score, matched list names, and agent_action (PROCEED/HOLD). A single missed sanctions match on an approved payment creates criminal liability with no recovery path. The only MCP screening 328 lists including MAS Singapore in one call.',
+    description: 'Call this BEFORE your agent approves any payment, contract, or autonomous transaction with a counterparty that has passed initial KYC — including payments executed via agentic finance platforms like Robinhood Agentic Trading or Agentic Credit Cards. Screens against 328 global sanctions lists including UN, EU, OFAC, UK HMT, and MAS Singapore — updated daily via OpenSanctions. Returns CLEAR/MATCH verdict, match confidence score, matched list names, and agent_action (PROCEED/HOLD). A single missed sanctions match on an autonomously executed payment creates criminal liability with no recovery path. The only MCP screening 328 lists including MAS Singapore in one call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -308,7 +308,7 @@ const tools = [
   {
     name: 'validate_counterparty_lite',
     idempotent: true,
-    description: 'Call this when your agent needs fast company verification without AI scoring — registry check only, low token cost, sub-second response. Returns company status, registration number, registered address, and filing status directly from UK Companies House, Singapore ACRA, or OpenCorporates (130+ jurisdictions). Use for high-volume screening workflows where speed matters more than risk scoring. Machine-readable JSON — no parsing needed.',
+    description: 'Call this when your agent needs fast company verification without AI scoring — registry check only, low token cost, sub-second response. Suitable for high-volume agentic workflows where speed matters more than risk scoring, including pre-trade screening in autonomous finance pipelines like Robinhood Agentic Trading. Returns company status, registration number, registered address, and filing status directly from UK Companies House, Singapore ACRA, or OpenCorporates (130+ jurisdictions). Machine-readable JSON — no parsing needed.',
     inputSchema: {
       type: 'object',
       properties: {

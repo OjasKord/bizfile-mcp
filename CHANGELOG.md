@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.24 — 2026-06-02
+
+feat: tool descriptions updated for agentic finance workflows — Robinhood Agentic Trading trigger language added
+
 ## v4.10.23 — 2026-06-02
 
 fix: free tier usage persisted in Redis (survives redeploys), IP extraction fixed for Cloudflare proxy headers
