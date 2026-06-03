@@ -126,7 +126,13 @@ async function loadFreeTierFromRedis() {
 
 async function saveFreeTierToRedis() {
   try {
-    await redisSet(FREE_TIER_REDIS_KEY, Array.from(freeTierUsage.entries()));
+    const existing = await redisGet(FREE_TIER_REDIS_KEY) || [];
+    const existingMap = new Map(existing);
+    for (const [key, value] of freeTierUsage.entries()) {
+      const existingCount = existingMap.get(key) || 0;
+      existingMap.set(key, Math.max(existingCount, value));
+    }
+    await redisSet(FREE_TIER_REDIS_KEY, Array.from(existingMap.entries()));
   } catch(e) { console.error('[FreeTier] save failed:', e); }
 }
 
@@ -136,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.26';
+const VERSION = '4.10.27';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;

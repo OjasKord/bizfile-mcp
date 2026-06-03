@@ -5,6 +5,10 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.27 — 2026-06-03
+
+fix: saveFreeTierToRedis merges with existing Redis data — prevents historical IP counts lost on redeploy
+
 ## v4.10.26 — 2026-06-03
 
 feat: per-IP free tier breakdown added to /stats endpoint
