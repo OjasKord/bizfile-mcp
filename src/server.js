@@ -136,7 +136,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.25';
+const VERSION = '4.10.26';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -845,8 +845,16 @@ const server = http.createServer(async (req, res) => {
     const totalFreeCalls = Array.from(freeTierUsage.values()).reduce((a, b) => a + b, 0);
     const totalSanctionsChecks = Array.from(apiKeys.values()).reduce((a, r) => a + (r.sanctionsChecks || 0), 0);
     const freeUniqueIPs = new Set(Array.from(freeTierUsage.keys()).map(k => k.split(':')[0])).size;
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const breakdown = {};
+    for (const [key, count] of freeTierUsage.entries()) {
+      if (key.includes(':' + monthPrefix)) {
+        const ip = key.split(':')[0];
+        breakdown[ip.slice(0, 10) + '...'] = count;
+      }
+    }
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolUsageCounts, recent_calls: usageLog.slice(-20).reverse(), trial_extensions_granted: trialExtensions.size }));
+    res.end(JSON.stringify({ free_tier_unique_ips: freeUniqueIPs, free_tier_total_calls: totalFreeCalls, paid_keys_issued: apiKeys.size, total_sanctions_checks: totalSanctionsChecks, tool_usage: toolUsageCounts, recent_calls: usageLog.slice(-20).reverse(), trial_extensions_granted: trialExtensions.size, free_tier_breakdown: breakdown }));
     return;
   }
 
