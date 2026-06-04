@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.29';
+const VERSION = '4.10.30';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1022,7 +1022,17 @@ const server = http.createServer(async (req, res) => {
             rr.on('end', () => {
               try {
                 const parsed2 = JSON.parse(d);
-                resolve(parsed2.summary ? { ok: true, summary: parsed2.summary } : { ok: false });
+                if (parsed2.calls_24h !== undefined) {
+                  resolve({ ok: true, summary: {
+                    calls_24h: parsed2.calls_24h,
+                    unique_ips_24h: parsed2.unique_ips_24h,
+                    limit_hits: parsed2.limit_hits,
+                    trial_extensions: parsed2.trial_extensions,
+                    paid_conversions: parsed2.paid_conversions
+                  }});
+                } else {
+                  resolve({ ok: false });
+                }
               } catch { resolve({ ok: false }); }
             });
           });
