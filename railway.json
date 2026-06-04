@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "cronJobs": [
+      {
+        "schedule": "0 0 * * *",
+        "command": "curl -s -X POST http://localhost:$PORT/daily-report -H \"x-stats-key: ojas2026\""
+      }
+    ]
+  }
+}

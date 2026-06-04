@@ -5,6 +5,12 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.28 — 2026-06-04
+
+### Added
+- `/daily-report` POST endpoint — collects 24h activity from in-memory state + Redis session log, builds dark-themed HTML email, sends to ojas@kordagencies.com via Resend. Returns JSON summary with calls_24h, unique_ips_24h, limit_hits, trial_extensions, paid_conversions.
+- `railway.json` cron job — fires at 00:00 UTC (08:00 SGT) daily: `curl -X POST /daily-report`
+
 ## v4.10.27 — 2026-06-03
 
 fix: saveFreeTierToRedis merges with existing Redis data — prevents historical IP counts lost on redeploy
