@@ -5,6 +5,12 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.29 — 2026-06-04
+
+### Changed
+- `/daily-report` now aggregates all 9 servers into one consolidated email with grand totals at the top, a section per server, and red "unavailable" for unreachable servers. Subject updated to "Kord Agencies MCP — Daily Report".
+- JSON response now returns `grand_totals` + `servers` array instead of single-server `summary`.
+
 ## v4.10.28 — 2026-06-04
 
 ### Added

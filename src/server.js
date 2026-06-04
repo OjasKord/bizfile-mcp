@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.28';
+const VERSION = '4.10.29';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1006,11 +1006,37 @@ const server = http.createServer(async (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       const since24h = new Date(Date.now() - 86400000).toISOString();
 
+      // ── Helper to fetch another server's /daily-report ───────────────────
+      function fetchServerReport(url) {
+        return new Promise((resolve) => {
+          const parsed = new URL(url);
+          const reqOpts = {
+            hostname: parsed.hostname,
+            path: parsed.pathname,
+            method: 'POST',
+            headers: { 'x-stats-key': STATS_KEY, 'Content-Length': 0 }
+          };
+          const r = https.request(reqOpts, (rr) => {
+            let d = '';
+            rr.on('data', c => d += c);
+            rr.on('end', () => {
+              try {
+                const parsed2 = JSON.parse(d);
+                resolve(parsed2.summary ? { ok: true, summary: parsed2.summary } : { ok: false });
+              } catch { resolve({ ok: false }); }
+            });
+          });
+          r.on('error', () => resolve({ ok: false }));
+          r.setTimeout(10000, () => { r.destroy(); resolve({ ok: false }); });
+          r.end();
+        });
+      }
+
+      // ── Collect Bizfile own data ─────────────────────────────────────────
       const recentLog = usageLog.filter(e => e.time >= since24h);
       const calls24h = recentLog.length;
       const toolBreakdown = {};
       recentLog.forEach(e => { toolBreakdown[e.tool] = (toolBreakdown[e.tool] || 0) + 1; });
-
       const uniqueIPs = [...new Set(recentLog.map(e => e.ip))];
 
       const limitHits = [];
@@ -1042,55 +1068,122 @@ const server = http.createServer(async (req, res) => {
         calls.forEach(c => { if (c.tool) sessionToolCounts[c.tool] = (sessionToolCounts[c.tool] || 0) + 1; });
       }
 
-      const section = (title, rows) => rows.length === 0 ? '' :
-        '<div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:16px 20px;margin-bottom:16px">' +
-        '<div style="color:#5A6478;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">' + title + '</div>' +
-        rows.map(r => '<div style="color:#E8EDF5;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)">' + r + '</div>').join('') +
+      const bizfileSummary = {
+        calls_24h: calls24h,
+        unique_ips_24h: uniqueIPs.length,
+        limit_hits: limitHits.length,
+        trial_extensions: recentTrials.length,
+        paid_conversions: recentPaid.length
+      };
+
+      // ── Fetch all other servers in parallel ──────────────────────────────
+      const OTHER_SERVERS = [
+        { name: 'vat-validator-mcp',               url: 'https://vat-validator-mcp-production.up.railway.app/daily-report' },
+        { name: 'tender-mcp',                       url: 'https://tender-mcp-production.up.railway.app/daily-report' },
+        { name: 'data-compliance-mcp',              url: 'https://data-compliance-mcp-production.up.railway.app/daily-report' },
+        { name: 'url-safety-validator-mcp',         url: 'https://url-safety-validator-mcp-production.up.railway.app/daily-report' },
+        { name: 'local-model-suitability-mcp',      url: 'https://local-model-suitability-mcp-production.up.railway.app/daily-report' },
+        { name: 'hs-code-classifier-mcp',           url: 'https://hs-code-classifier-mcp-server-production.up.railway.app/daily-report' },
+        { name: 'quantum-suitability-validator-mcp',url: 'https://quantum-suitability-validator-mcp-production.up.railway.app/daily-report' },
+        { name: 'document-integrity-validator-mcp', url: 'https://document-integrity-validator-mcp-production.up.railway.app/daily-report' }
+      ];
+
+      const otherResults = await Promise.all(OTHER_SERVERS.map(s => fetchServerReport(s.url)));
+      const otherSummaries = OTHER_SERVERS.map((s, i) => ({
+        name: s.name,
+        ...(otherResults[i].ok ? { summary: otherResults[i].summary } : { unavailable: true })
+      }));
+
+      // ── Grand totals ─────────────────────────────────────────────────────
+      const allSummaries = [{ name: 'bizfile-mcp', summary: bizfileSummary }, ...otherSummaries];
+      const grandTotals = allSummaries.reduce((acc, s) => {
+        if (!s.summary) return acc;
+        acc.calls_24h += s.summary.calls_24h || 0;
+        acc.unique_ips_24h += s.summary.unique_ips_24h || 0;
+        acc.limit_hits += s.summary.limit_hits || 0;
+        acc.trial_extensions += s.summary.trial_extensions || 0;
+        acc.paid_conversions += s.summary.paid_conversions || 0;
+        return acc;
+      }, { calls_24h: 0, unique_ips_24h: 0, limit_hits: 0, trial_extensions: 0, paid_conversions: 0 });
+
+      // ── Build HTML ────────────────────────────────────────────────────────
+      const row = (label, val) =>
+        '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px">' +
+        '<span style="color:#5A6478">' + label + '</span>' +
+        '<span style="color:#E8EDF5;font-family:monospace">' + val + '</span></div>';
+
+      const serverBlock = (name, summary, unavailable) => {
+        const color = unavailable ? '#E07070' : '#00E5C3';
+        let content = '';
+        if (unavailable) {
+          content = '<div style="color:#E07070;font-size:12px;padding:6px 0">unavailable — 404 or unreachable</div>';
+        } else {
+          content =
+            row('Calls 24h', summary.calls_24h) +
+            row('Unique IPs 24h', summary.unique_ips_24h) +
+            row('Limit hits', summary.limit_hits) +
+            row('Trial extensions', summary.trial_extensions) +
+            row('Paid conversions', summary.paid_conversions);
+        }
+        return '<div style="margin-bottom:20px">' +
+          '<div style="color:' + color + ';font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">' + name + '</div>' +
+          '<div style="background:#111820;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px">' + content + '</div>' +
+          '</div>';
+      };
+
+      const grandBlock =
+        '<div style="background:#141B24;border:1px solid rgba(0,229,195,0.25);border-radius:6px;padding:16px 20px;margin-bottom:28px">' +
+        '<div style="color:#00E5C3;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">All 9 servers — Grand Totals</div>' +
+        row('Total calls 24h', grandTotals.calls_24h) +
+        row('Total unique IPs 24h', grandTotals.unique_ips_24h) +
+        row('Total limit hits', grandTotals.limit_hits) +
+        row('Total trial extensions', grandTotals.trial_extensions) +
+        row('Total paid conversions', grandTotals.paid_conversions) +
         '</div>';
 
-      const hasActivity = calls24h > 0 || limitHits.length > 0 || recentTrials.length > 0 || recentPaid.length > 0;
-      let body = '';
-
-      if (!hasActivity && Object.keys(sessionToolCounts).length === 0) {
-        body = '<div style="color:#5A6478;font-size:13px;padding:16px 0">No activity in the last 24 hours.</div>';
-      } else {
-        if (calls24h > 0) {
-          const callRows = ['Total: ' + calls24h + ' call' + (calls24h !== 1 ? 's' : '')].concat(
-            Object.entries(toolBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c)
-          );
-          body += section('Calls last 24h', callRows);
-        }
-        if (uniqueIPs.length > 0) body += section('Unique IPs last 24h (' + uniqueIPs.length + ')', uniqueIPs);
-        if (limitHits.length > 0) body += section('Free tier limit hits', limitHits.map(h => h.ip + ' &mdash; ' + h.count + ' calls'));
-        if (recentTrials.length > 0) body += section('Trial extensions (last 24h)', recentTrials.map(t => t.name + ' &lt;' + t.email + '&gt; &mdash; ' + (t.use_case || 'no use case')));
-        if (recentPaid.length > 0) body += section('Paid conversions (last 24h)', recentPaid.map(p => p.email + ' &mdash; ' + p.plan));
-        if (Object.keys(sessionToolCounts).length > 0) body += section('Session log today (Redis)', Object.entries(sessionToolCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c));
+      // Bizfile own detail block
+      let bizfileDetail = '';
+      if (calls24h > 0) {
+        const toolRows = Object.entries(toolBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => row(t, c)).join('');
+        bizfileDetail = '<div style="background:#111820;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;margin-top:-10px;margin-bottom:20px">' +
+          '<div style="color:#5A6478;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Tool breakdown</div>' +
+          toolRows + '</div>';
+      }
+      if (recentTrials.length > 0) {
+        bizfileDetail += '<div style="background:#111820;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;margin-top:-10px;margin-bottom:20px">' +
+          '<div style="color:#5A6478;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Trial extensions</div>' +
+          recentTrials.map(t => row(t.name + ' &lt;' + t.email + '&gt;', t.use_case || '—')).join('') + '</div>';
+      }
+      if (recentPaid.length > 0) {
+        bizfileDetail += '<div style="background:#111820;border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:10px 14px;margin-top:-10px;margin-bottom:20px">' +
+          '<div style="color:#5A6478;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Paid conversions</div>' +
+          recentPaid.map(p => row(p.email, p.plan)).join('') + '</div>';
       }
 
+      const serversHtml =
+        serverBlock('bizfile-mcp', bizfileSummary, false) + bizfileDetail +
+        otherSummaries.map(s => serverBlock(s.name, s.summary, s.unavailable)).join('');
+
       const html =
-        '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto">' +
+        '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:640px;margin:0 auto">' +
         '<div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px">' +
-        '<div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px">Bizfile MCP</div>' +
-        '<h1 style="font-size:20px;font-weight:700;margin-bottom:4px;color:#FFFFFF">Daily Report</h1>' +
-        '<div style="color:#5A6478;font-size:12px;margin-bottom:24px">' + today + ' &middot; generated ' + new Date().toISOString().slice(11, 19) + ' UTC</div>' +
-        body +
-        '<p style="color:#5A6478;font-size:11px;margin-top:16px">bizfile-mcp-production.up.railway.app</p>' +
+        '<div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px">Kord Agencies</div>' +
+        '<h1 style="font-size:20px;font-weight:700;margin-bottom:4px;color:#FFFFFF">Daily Report — All 9 Servers</h1>' +
+        '<div style="color:#5A6478;font-size:12px;margin-bottom:28px">' + today + ' &middot; generated ' + new Date().toISOString().slice(11, 19) + ' UTC</div>' +
+        grandBlock +
+        serversHtml +
+        '<p style="color:#5A6478;font-size:11px;margin-top:16px">kordagencies.com</p>' +
         '</div></body></html>';
 
-      const emailResult = await sendEmail('ojas@kordagencies.com', 'Bizfile MCP — Daily Report ' + today, html);
+      const emailResult = await sendEmail('ojas@kordagencies.com', 'Kord Agencies MCP — Daily Report ' + today, html);
       const sent = !emailResult.error && emailResult.status >= 200 && emailResult.status < 300;
 
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         sent,
         date: today,
-        summary: {
-          calls_24h: calls24h,
-          unique_ips_24h: uniqueIPs.length,
-          limit_hits: limitHits.length,
-          trial_extensions: recentTrials.length,
-          paid_conversions: recentPaid.length
-        }
+        grand_totals: grandTotals,
+        servers: allSummaries
       }));
     })();
     return;
