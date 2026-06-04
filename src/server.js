@@ -998,6 +998,104 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === '/daily-report' && req.method === 'POST') {
+    if (req.headers['x-stats-key'] !== STATS_KEY) {
+      res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return;
+    }
+    (async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const since24h = new Date(Date.now() - 86400000).toISOString();
+
+      const recentLog = usageLog.filter(e => e.time >= since24h);
+      const calls24h = recentLog.length;
+      const toolBreakdown = {};
+      recentLog.forEach(e => { toolBreakdown[e.tool] = (toolBreakdown[e.tool] || 0) + 1; });
+
+      const uniqueIPs = [...new Set(recentLog.map(e => e.ip))];
+
+      const limitHits = [];
+      for (const [key, count] of freeTierUsage.entries()) {
+        if (count >= FREE_TIER_LIMIT) {
+          const ip = key.slice(0, key.length - 8);
+          limitHits.push({ ip: ip.slice(0, 10) + '...', count });
+        }
+      }
+
+      const recentTrials = [];
+      for (const record of trialExtensions.values()) {
+        if (record.granted_at && record.granted_at >= since24h) {
+          recentTrials.push({ name: record.name, email: record.email, use_case: record.use_case || '' });
+        }
+      }
+
+      const recentPaid = [];
+      for (const record of apiKeys.values()) {
+        if (record.createdAt && record.createdAt >= since24h) {
+          recentPaid.push({ email: record.email || 'unknown', plan: record.plan });
+        }
+      }
+
+      const sessionKeys = await redisKeys('bizfile:session:*:' + today);
+      const sessionToolCounts = {};
+      for (const key of sessionKeys) {
+        const calls = await redisGet(key) || [];
+        calls.forEach(c => { if (c.tool) sessionToolCounts[c.tool] = (sessionToolCounts[c.tool] || 0) + 1; });
+      }
+
+      const section = (title, rows) => rows.length === 0 ? '' :
+        '<div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:16px 20px;margin-bottom:16px">' +
+        '<div style="color:#5A6478;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">' + title + '</div>' +
+        rows.map(r => '<div style="color:#E8EDF5;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)">' + r + '</div>').join('') +
+        '</div>';
+
+      const hasActivity = calls24h > 0 || limitHits.length > 0 || recentTrials.length > 0 || recentPaid.length > 0;
+      let body = '';
+
+      if (!hasActivity && Object.keys(sessionToolCounts).length === 0) {
+        body = '<div style="color:#5A6478;font-size:13px;padding:16px 0">No activity in the last 24 hours.</div>';
+      } else {
+        if (calls24h > 0) {
+          const callRows = ['Total: ' + calls24h + ' call' + (calls24h !== 1 ? 's' : '')].concat(
+            Object.entries(toolBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c)
+          );
+          body += section('Calls last 24h', callRows);
+        }
+        if (uniqueIPs.length > 0) body += section('Unique IPs last 24h (' + uniqueIPs.length + ')', uniqueIPs);
+        if (limitHits.length > 0) body += section('Free tier limit hits', limitHits.map(h => h.ip + ' &mdash; ' + h.count + ' calls'));
+        if (recentTrials.length > 0) body += section('Trial extensions (last 24h)', recentTrials.map(t => t.name + ' &lt;' + t.email + '&gt; &mdash; ' + (t.use_case || 'no use case')));
+        if (recentPaid.length > 0) body += section('Paid conversions (last 24h)', recentPaid.map(p => p.email + ' &mdash; ' + p.plan));
+        if (Object.keys(sessionToolCounts).length > 0) body += section('Session log today (Redis)', Object.entries(sessionToolCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c));
+      }
+
+      const html =
+        '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto">' +
+        '<div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px">' +
+        '<div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px">Bizfile MCP</div>' +
+        '<h1 style="font-size:20px;font-weight:700;margin-bottom:4px;color:#FFFFFF">Daily Report</h1>' +
+        '<div style="color:#5A6478;font-size:12px;margin-bottom:24px">' + today + ' &middot; generated ' + new Date().toISOString().slice(11, 19) + ' UTC</div>' +
+        body +
+        '<p style="color:#5A6478;font-size:11px;margin-top:16px">bizfile-mcp-production.up.railway.app</p>' +
+        '</div></body></html>';
+
+      const emailResult = await sendEmail('ojas@kordagencies.com', 'Bizfile MCP — Daily Report ' + today, html);
+      const sent = !emailResult.error && emailResult.status >= 200 && emailResult.status < 300;
+
+      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        sent,
+        date: today,
+        summary: {
+          calls_24h: calls24h,
+          unique_ips_24h: uniqueIPs.length,
+          limit_hits: limitHits.length,
+          trial_extensions: recentTrials.length,
+          paid_conversions: recentPaid.length
+        }
+      }));
+    })();
+    return;
+  }
+
   if (req.method === 'POST') {
     let body = ''; req.on('data', c => body += c);
     req.on('end', async () => {
@@ -1141,121 +1239,6 @@ a{color:#00E5C3}
 <a href="https://kordagencies.com">kordagencies.com</a></p>
 </body>
 </html>`);
-    return;
-  }
-
-  if (req.url === '/daily-report' && req.method === 'POST') {
-    if (req.headers['x-stats-key'] !== STATS_KEY) {
-      res.writeHead(401, cors); res.end(JSON.stringify({ error: 'Unauthorized' })); return;
-    }
-    (async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      const since24h = new Date(Date.now() - 86400000).toISOString();
-
-      // In-memory: calls last 24h
-      const recentLog = usageLog.filter(e => e.time >= since24h);
-      const calls24h = recentLog.length;
-      const toolBreakdown = {};
-      recentLog.forEach(e => { toolBreakdown[e.tool] = (toolBreakdown[e.tool] || 0) + 1; });
-
-      // Unique IPs last 24h (truncated in log)
-      const uniqueIPs = [...new Set(recentLog.map(e => e.ip))];
-
-      // Free tier limit hits (key format: {ip}:{YYYY-MM}, last 8 chars are ':YYYY-MM')
-      const limitHits = [];
-      for (const [key, count] of freeTierUsage.entries()) {
-        if (count >= FREE_TIER_LIMIT) {
-          const ip = key.slice(0, key.length - 8);
-          limitHits.push({ ip: ip.slice(0, 10) + '...', count });
-        }
-      }
-
-      // Trial extensions last 24h
-      const recentTrials = [];
-      for (const record of trialExtensions.values()) {
-        if (record.granted_at && record.granted_at >= since24h) {
-          recentTrials.push({ name: record.name, email: record.email, use_case: record.use_case || '' });
-        }
-      }
-
-      // Paid keys last 24h
-      const recentPaid = [];
-      for (const record of apiKeys.values()) {
-        if (record.createdAt && record.createdAt >= since24h) {
-          recentPaid.push({ email: record.email || 'unknown', plan: record.plan });
-        }
-      }
-
-      // Redis: today's session calls per tool
-      const sessionKeys = await redisKeys('bizfile:session:*:' + today);
-      const sessionToolCounts = {};
-      for (const key of sessionKeys) {
-        const calls = await redisGet(key) || [];
-        calls.forEach(c => { if (c.tool) sessionToolCounts[c.tool] = (sessionToolCounts[c.tool] || 0) + 1; });
-      }
-
-      // Build HTML sections
-      const section = (title, rows) => rows.length === 0 ? '' :
-        '<div style="background:#141B24;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:16px 20px;margin-bottom:16px">' +
-        '<div style="color:#5A6478;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px">' + title + '</div>' +
-        rows.map(r => '<div style="color:#E8EDF5;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)">' + r + '</div>').join('') +
-        '</div>';
-
-      const hasActivity = calls24h > 0 || limitHits.length > 0 || recentTrials.length > 0 || recentPaid.length > 0;
-      let body = '';
-
-      if (!hasActivity && Object.keys(sessionToolCounts).length === 0) {
-        body = '<div style="color:#5A6478;font-size:13px;padding:16px 0">No activity in the last 24 hours.</div>';
-      } else {
-        if (calls24h > 0) {
-          const callRows = ['Total: ' + calls24h + ' call' + (calls24h !== 1 ? 's' : '')].concat(
-            Object.entries(toolBreakdown).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c)
-          );
-          body += section('Calls last 24h', callRows);
-        }
-        if (uniqueIPs.length > 0) {
-          body += section('Unique IPs last 24h (' + uniqueIPs.length + ')', uniqueIPs);
-        }
-        if (limitHits.length > 0) {
-          body += section('Free tier limit hits', limitHits.map(h => h.ip + ' &mdash; ' + h.count + ' calls'));
-        }
-        if (recentTrials.length > 0) {
-          body += section('Trial extensions (last 24h)', recentTrials.map(t => t.name + ' &lt;' + t.email + '&gt; &mdash; ' + (t.use_case || 'no use case')));
-        }
-        if (recentPaid.length > 0) {
-          body += section('Paid conversions (last 24h)', recentPaid.map(p => p.email + ' &mdash; ' + p.plan));
-        }
-        if (Object.keys(sessionToolCounts).length > 0) {
-          body += section('Session log today (Redis)', Object.entries(sessionToolCounts).sort((a, b) => b[1] - a[1]).map(([t, c]) => t + ': ' + c));
-        }
-      }
-
-      const html =
-        '<!DOCTYPE html><html><body style="font-family:monospace;background:#080A0F;color:#E8EDF5;padding:40px;max-width:600px;margin:0 auto">' +
-        '<div style="border:1px solid rgba(0,229,195,0.3);border-radius:8px;padding:32px">' +
-        '<div style="color:#00E5C3;font-size:13px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:8px">Bizfile MCP</div>' +
-        '<h1 style="font-size:20px;font-weight:700;margin-bottom:4px;color:#FFFFFF">Daily Report</h1>' +
-        '<div style="color:#5A6478;font-size:12px;margin-bottom:24px">' + today + ' &middot; generated ' + new Date().toISOString().slice(11, 19) + ' UTC</div>' +
-        body +
-        '<p style="color:#5A6478;font-size:11px;margin-top:16px">bizfile-mcp-production.up.railway.app</p>' +
-        '</div></body></html>';
-
-      const emailResult = await sendEmail('ojas@kordagencies.com', 'Bizfile MCP — Daily Report ' + today, html);
-      const sent = !emailResult.error && emailResult.status >= 200 && emailResult.status < 300;
-
-      res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        sent,
-        date: today,
-        summary: {
-          calls_24h: calls24h,
-          unique_ips_24h: uniqueIPs.length,
-          limit_hits: limitHits.length,
-          trial_extensions: recentTrials.length,
-          paid_conversions: recentPaid.length
-        }
-      }));
-    })();
     return;
   }
 
