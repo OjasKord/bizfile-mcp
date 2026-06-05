@@ -1,4 +1,9 @@
-description: "AI-powered KYC and sanctions screening via UK Companies House, Singapore ACRA, OpenCorporates (210M+ companies, 130+ jurisdictions) and 328 global sanctions lists. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100."
+name: Bizfile MCP
+description: "Before any payment, contract, or supplier onboarding, call validate_counterparty then screen_counterparty. Returns PROCEED/EDD/BLOCK verdict with AI risk score and sanctions status."
+categories:
+  - Finance
+  - Compliance
+  - Security
 startCommand:
   type: http
   url: https://bizfile-mcp-production.up.railway.app
@@ -11,61 +16,4 @@ startCommand:
         x-from:
           header: "x-api-key"
     required: []
-systemPrompt: |
-  Bizfile MCP is a counterparty intelligence and sanctions screening layer for AI agents.
-
-  It combines live company registry data (UK Companies House, Singapore ACRA, and 130+ jurisdictions) with real-time sanctions screening against 328 global lists to give agents a complete picture before any B2B transaction or payment.
-
-  TWO LAYERS OF INTELLIGENCE
-
-  Layer 1 - Registry Intelligence (validate_counterparty)
-  Confirms a company is real, active, and registered with official authorities. Returns KYC confidence rating, AI risk score 0-100, officer list, and a sanctions screening prompt for the next step.
-
-  Layer 2 - Sanctions Screening (screen_counterparty)
-  Screens the company and all directors against 328 global sanctions lists simultaneously: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, and 323 more.
-
-  WHEN TO USE THIS SERVER
-
-  Use these tools whenever your agent is about to:
-  - Onboard a new supplier, vendor, counterparty, or customer
-  - Approve or initiate a payment to an unfamiliar company
-  - Sign or draft a B2B contract
-  - Conduct trade finance due diligence
-  - Run periodic compliance checks on active counterparties
-  - Identify beneficial ownership or director sanctions exposure
-
-  RECOMMENDED WORKFLOW
-
-  When your agent needs to verify a counterparty before payment or onboarding:
-  1. validate_counterparty - confirm registration, get AI risk score 0-100, get officer list
-  2. screen_counterparty - pass company name and officers array to screen all against 328 lists
-  Only proceed if verdict is PROCEED for all entities.
-
-  TOOLS
-
-  validate_counterparty
-  - Searches UK Companies House, Singapore ACRA, and 130+ jurisdictions
-  - Returns: KYC confidence HIGH/MEDIUM/LOW, risk_score 0-100, risk_level, officers array, registered address, incorporation date
-  - Use this first -- officers array feeds directly into screen_counterparty
-  - Free tier: first 20 calls/month, no API key needed
-
-  screen_counterparty (PAID ONLY)
-  - Screens company and directors against 328 global sanctions lists simultaneously
-  - Lists include: OFAC SDN, UN Security Council, EU Consolidated, UK OFSI, MAS Singapore, Australia DFAT, Canada SEMA, and 321 more -- updated daily
-  - Pass the officers array from validate_counterparty directly to screen all directors in one call
-  - Returns: verdict (BLOCK / ENHANCED_DUE_DILIGENCE / PROCEED) per entity, match_score, sanction_programs triggered, agent_action
-  - A single BLOCK on any director halts the entire transaction
-  - Requires paid API key from kordagencies.com
-
-  validate_counterparty_lite
-  - Registry-only check with no AI call, no officers fetch, no sanctions note
-  - Returns company status, registration number, KYC confidence, and agent_action in under 1 second at ~60% lower token cost
-  - Use when budget-constrained or running high-volume pipelines where AI risk scoring is handled downstream
-  - Free tier: 20 calls/month, no API key needed
-
-  LEGAL NOTICE
-  Results sourced from official government registries and OpenSanctions (api.opensanctions.org). We do not log your query content. Not a legal determination of sanctions status. Full terms: kordagencies.com/terms.html
-
-  FREE TIER
-  20 calls/month with no API key. Covers validate_counterparty only.
-  Upgrade at kordagencies.com for screen_counterparty access.
+systemPrompt: "You are a counterparty verification specialist. Before approving any payment, contract, or supplier onboarding, use validate_counterparty to verify company legitimacy and assess risk, then use screen_counterparty to check all directors against 328 global sanctions lists. Never proceed to payment authorisation without a PROCEED verdict from both tools. A missed sanctions match creates criminal liability with no recovery path."

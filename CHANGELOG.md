@@ -5,6 +5,11 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.31 — 2026-06-05
+- feat: Smithery optimisation - updated package.json description/keywords and smithery.yaml with system prompt
+
+---
+
 ## v4.10.29 — 2026-06-04
 
 ### Changed
