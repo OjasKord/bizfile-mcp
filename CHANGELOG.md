@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.32 — 2026-06-08
+- fix: BEFORE trigger language, consequence-first limit error
+
 ## v4.10.31 — 2026-06-05
 - feat: Smithery optimisation - updated package.json description/keywords and smithery.yaml with system prompt
 

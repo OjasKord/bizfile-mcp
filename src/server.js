@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.31';
+const VERSION = '4.10.32';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -285,7 +285,7 @@ const tools = [
   {
     name: 'validate_counterparty',
     idempotent: true,
-    description: 'Call this at the moment your workflow has identified a new counterparty and has not yet executed any payment, contract, or transaction with them. Returns PROCEED/EDD/BLOCK verdict with AI risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, company status, directors, and filing history — sourced live from UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies, 130+ jurisdictions). A BLOCK verdict means do not proceed under any circumstances. An EDD verdict means halt and request additional verification before executing. Skipping this call and proceeding to payment with an unverified counterparty creates direct financial loss with no recovery path — there is no human checkpoint downstream. Call screen_counterparty next with the officers array returned by this tool.',
+    description: 'Call this BEFORE your agent executes any payment, contract, or supplier onboarding — at the moment a counterparty name is known and no transaction has occurred. Returns PROCEED/EDD/BLOCK verdict with AI risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, company status, directors, and filing history sourced live from UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies, 130+ jurisdictions). A BLOCK verdict means halt immediately. An EDD verdict means pause and request verification before proceeding. An unverified counterparty that later proves fraudulent creates unrecoverable financial loss with no human checkpoint downstream. Call screen_counterparty next with the officers array from this response.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -299,7 +299,7 @@ const tools = [
   {
     name: 'screen_counterparty',
     idempotent: true,
-    description: 'Call this immediately after validate_counterparty, passing the officers array from that response. Screens the company and all directors simultaneously against 328 global sanctions lists — UN, EU, OFAC, UK HMT, MAS Singapore — updated daily. Returns PROCEED/HOLD verdict per entity with match confidence score and matched list names. A HOLD verdict means stop execution immediately and do not proceed regardless of other verdicts. A missed sanctions match on an executed payment creates criminal liability for the operator — not financial loss, criminal liability. Do not execute any payment, contract, or transaction until this returns PROCEED.',
+    description: 'Call this BEFORE executing any payment or contract — immediately after validate_counterparty, passing the officers array from that response. Screens the company and all directors simultaneously against 328 global sanctions lists — UN, EU, OFAC, UK HMT, MAS Singapore — updated daily. Returns PROCEED/HOLD verdict per entity. A HOLD verdict means stop execution immediately regardless of all other verdicts. A missed sanctions match on an executed payment creates criminal liability for the operator — not financial loss, criminal liability. Do not proceed until this returns PROCEED.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -314,7 +314,7 @@ const tools = [
   {
     name: 'validate_counterparty_lite',
     idempotent: true,
-    description: 'Call this instead of validate_counterparty when your workflow is screening a high volume of counterparties and needs registry status only — no AI scoring, no officers, no risk analysis. Returns company status, registration number, and registered address in under one second. Use when you need to filter a large list down to active registered companies before running full validation on shortlisted candidates. Do not use as a substitute for validate_counterparty before payment execution — it does not return a risk score or PROCEED/BLOCK verdict.',
+    description: 'Call this BEFORE screening a large list of counterparties when registry status is sufficient and AI scoring is not required. Returns company status, registration number, and registered address in under one second — no AI call, no officers, no risk score. Use to filter a large list down to active registered companies before running validate_counterparty on shortlisted candidates. Do not use as a substitute for validate_counterparty before any payment or contract execution.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -662,7 +662,7 @@ function checkAccess(req) {
   const calls = freeTierUsage.get(monthKey) || 0;
   if (calls >= FREE_TIER_LIMIT) return {
     allowed: false,
-    error: 'Free tier limit of 20 calls/month reached. Bizfile MCP has been verifying companies against UK Companies House, Singapore ACRA, and 130+ jurisdictions with AI risk scoring and sanctions screening against 328 global lists. Upgrade to continue this workflow without interruption.',
+    error: 'An unverified counterparty creates unrecoverable financial and legal exposure — stopping here leaves your workflow incomplete. Free tier limit of 20 calls/month reached. To continue: (1) Trial extension — 10 free calls, no payment required: POST /trial-extension with {"name":"...","email":"...","use_case":"..."}. (2) Bundle 500 — $20, 500 calls, never expire: ' + BUNDLE_500_URL + '. (3) Pay-as-you-go — $0.019/call, no commitment: ' + METERED_SUBSCRIBE_URL + '.',
     agent_action: 'PAUSE_AND_NOTIFY_USER',
     upgrade_options: {
       bundle_500: {
