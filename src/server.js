@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.33';
+const VERSION = '4.10.34';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -157,6 +157,23 @@ const apiKeys = new Map();
 const toolUsageCounts = {};
 const trialExtensions = new Map();
 const TRIAL_EXTENSION_CALLS = 10;
+
+const perMinuteUsage = new Map();
+
+function checkPerMinuteLimit(ip, toolName, limit) {
+  const minuteKey = ip + ':' + toolName + ':' + new Date().toISOString().slice(0, 16);
+  const count = perMinuteUsage.get(minuteKey) || 0;
+  if (count >= limit) return false;
+  perMinuteUsage.set(minuteKey, count + 1);
+  if (perMinuteUsage.size > 10000) {
+    const currentMinute = new Date().toISOString().slice(0, 16);
+    for (const [key] of perMinuteUsage) {
+      if (!key.includes(currentMinute)) perMinuteUsage.delete(key);
+    }
+  }
+  return true;
+}
+
 const SANCTIONS_LIMITS = { bundle_500: 500, bundle_2000: 2000, metered: Infinity, internal: Infinity };
 const SANCTIONS_PRICE = { bundle_500: 0.15, bundle_2000: 0.125, metered: 0.50 };
 
@@ -976,17 +993,24 @@ const server = http.createServer(async (req, res) => {
             const { name, arguments: args } = request.params;
             const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
             const ip = rawIp.split(',')[0].trim();
-            usageLog.push({ tool: name, tier: access.tier || access.plan || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
-            if (usageLog.length > 1000) usageLog.shift();
-            toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
-            saveStats();
-            appendSessionLog(ip, name).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
-            const result = await executeTool(name, args || {});
-            if (access.plan === 'metered' && access.stripeCustomerId) {
-              const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
-              reportMeteredUsage(access.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
+            const killSwitchKey = 'TOOL_DISABLED_' + name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+            if (process.env[killSwitchKey] === 'true') {
+              response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } };
+            } else if (['validate_counterparty', 'screen_counterparty'].includes(name) && !checkPerMinuteLimit(ip, name, 5)) {
+              response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 5 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 5, window: '1 minute' }) }] } };
+            } else {
+              usageLog.push({ tool: name, tier: access.tier || access.plan || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
+              if (usageLog.length > 1000) usageLog.shift();
+              toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
+              saveStats();
+              appendSessionLog(ip, name).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
+              const result = await executeTool(name, args || {});
+              if (access.plan === 'metered' && access.stripeCustomerId) {
+                const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
+                reportMeteredUsage(access.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
+              }
+              response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
             }
-            response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
           }
         } else {
           response = { jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found: ' + request.method } };
@@ -1211,6 +1235,19 @@ const server = http.createServer(async (req, res) => {
 
         if (request.method === 'tools/call') {
           const toolName = request.params?.name;
+          const killSwitchKey = 'TOOL_DISABLED_' + (toolName || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+          if (process.env[killSwitchKey] === 'true') {
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } }));
+            return;
+          }
+          const _rawIpKs = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+          const _clientIpKs = _rawIpKs.split(',')[0].trim();
+          if (['validate_counterparty', 'screen_counterparty'].includes(toolName) && !checkPerMinuteLimit(_clientIpKs, toolName, 5)) {
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 5 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 5, window: '1 minute' }) }] } }));
+            return;
+          }
           if (toolName === 'screen_counterparty') {
             const sanctionsAccess = checkSanctionsAccess(req);
             if (!sanctionsAccess.allowed) {
@@ -1376,8 +1413,14 @@ function setupStdio() {
         response = { jsonrpc: '2.0', id: req.id, result: { prompts: [] } };
       } else if (req.method === 'tools/call') {
         try {
-          const result = await executeTool(req.params.name, req.params.arguments || {});
-          response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+          const _name = req.params.name;
+          const _ks = 'TOOL_DISABLED_' + (_name || '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+          if (process.env[_ks] === 'true') {
+            response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } };
+          } else {
+            const result = await executeTool(_name, req.params.arguments || {});
+            response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
+          }
         } catch(e) {
           response = { jsonrpc: '2.0', id: req.id, error: { code: -32603, message: e.message, agent_action: 'RETRY_IN_2_MIN' } };
         }

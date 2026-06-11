@@ -1,7 +1,7 @@
 {
   "name": "bizfile-mcp",
   "mcpName": "io.github.OjasKord/bizfile-mcp",
-  "version": "4.10.33",
+  "version": "4.10.34",
   "description": "Pre-payment counterparty verification for AI agents. KYC, sanctions screening across 328 lists, Companies House, ACRA. PROCEED/BLOCK verdict in one call.",
   "main": "src/server.js",
   "scripts": {

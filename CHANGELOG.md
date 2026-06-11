@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.34 — 2026-06-11
+- feat: per-tool kill switch + per-minute rate limiting on AI tools
+
 ## v4.10.33 — 2026-06-11
 - fix: add search_company alias for Smithery stale cache compatibility
 
