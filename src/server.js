@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.35';
+const VERSION = '4.10.36';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -945,7 +945,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === '/.well-known/mcp/server-card.json' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ name: 'bizfile-mcp', title: 'Bizfile MCP', version: VERSION, description: 'Counterparty validator for AI agents. Registry lookup, AI risk score 0-100, KYC confidence, officers and directors, sanctions screening across 328 lists.', tools: ['validate_counterparty', 'screen_counterparty', 'validate_counterparty_lite'], transport: 'streamable-http', homepage: 'https://kordagencies.com', token_footprint_min: 400, token_footprint_max: 700, token_footprint_avg: 504, idempotent_tools: ['validate_counterparty', 'screen_counterparty', 'validate_counterparty_lite'], circuit_breaker: false, health_endpoint: '/health', ready_endpoint: '/ready' }));
+    res.end(JSON.stringify({ serverInfo: { name: 'bizfile-mcp', version: VERSION }, tools: tools.map(t => ({ name: t.name, description: t.description.slice(0, 150) })), resources: [], prompts: [] }));
     return;
   }
 

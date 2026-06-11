@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.36 — 2026-06-11
+- feat: add /.well-known/mcp/server-card.json static metadata endpoint
+
 ## v4.10.35 — 2026-06-11
 - fix: bump version past existing npm publish (4.10.34 already on registry)
 
