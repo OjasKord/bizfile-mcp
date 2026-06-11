@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.32';
+const VERSION = '4.10.33';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -330,6 +330,9 @@ const tools = [
 
 async function executeTool(name, args) {
   const checkedAt = nowISO();
+
+  // Smithery legacy tool name alias — maps stale cached name to current tool
+  if (name === 'search_company') name = 'validate_counterparty';
 
   // ── validate_counterparty ──────────────────────────────────────────────────
   // Runs in parallel: registry search + company details + officers + AI risk

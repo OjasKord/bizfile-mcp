@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.33 — 2026-06-11
+- fix: add search_company alias for Smithery stale cache compatibility
+
 ## v4.10.32 — 2026-06-08
 - fix: BEFORE trigger language, consequence-first limit error
 
