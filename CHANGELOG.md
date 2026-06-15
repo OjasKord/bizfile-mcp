@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.38 — 2026-06-15
+- feat: add hold_reason, retry_after, escalation_path to all ENHANCED_DUE_DILIGENCE responses across validate_counterparty, validate_counterparty_lite, and screen_counterparty
+
 ## v4.10.37 — 2026-06-15
 - feat: reposition tool descriptions for agentic payment rail discovery -- Stripe MPP, Alipay AI Pay, Shopify UCP trigger vocabulary across all 3 tools and initialize description
 

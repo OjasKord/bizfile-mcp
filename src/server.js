@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.37';
+const VERSION = '4.10.38';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -382,6 +382,9 @@ async function executeTool(name, args) {
         risk_factors: ['Company not found in UK Companies House registry'],
         recommended_actions: ['Verify company name spelling and jurisdiction', 'Request official registration documents from counterparty', 'Do not proceed without independent verification'],
         message: 'No matching company found. This may mean the company does not exist, is registered in a different jurisdiction, or the name differs from the official registered name.',
+        hold_reason: 'Company name not found in UK Companies House registry -- may be registered in a different jurisdiction or trading under an alias',
+        retry_after: null,
+        escalation_path: 'Request official certificate of incorporation from counterparty and verify in their registered jurisdiction before proceeding',
         source_url: 'api.company-information.service.gov.uk',
         checked_at: checkedAt,
         _disclaimer: LEGAL_DISCLAIMER
@@ -467,6 +470,11 @@ async function executeTool(name, args) {
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
+    if (aiRisk.risk_level === 'HIGH' || aiRisk.risk_level === 'MEDIUM') {
+      _rValidate.hold_reason = aiRisk.risk_factors[0] || 'AI risk assessment indicates elevated counterparty risk';
+      _rValidate.retry_after = null;
+      _rValidate.escalation_path = 'Conduct manual KYC review and request certified registration documents and director identification before proceeding';
+    }
     _rValidate.token_count = Math.ceil(JSON.stringify(_rValidate).length / 4);
     return _rValidate;
   }
@@ -583,6 +591,15 @@ async function executeTool(name, args) {
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
+    if (overallVerdict === 'ENHANCED_DUE_DILIGENCE') {
+      const firstEddResult = screeningResults.find(r => r.verdict === 'ENHANCED_DUE_DILIGENCE');
+      const hasUnavailable = screeningResults.some(r => r.verdict === 'UNABLE_TO_SCREEN');
+      _rScreen.hold_reason = hasUnavailable
+        ? 'OpenSanctions API was unavailable for one or more entities -- screening is incomplete'
+        : (firstEddResult && firstEddResult.summary) || 'Sanctions database match requires enhanced due diligence review';
+      _rScreen.retry_after = hasUnavailable ? 120 : null;
+      _rScreen.escalation_path = 'Obtain additional entity documentation and escalate to compliance officer before authorising payment';
+    }
     _rScreen.token_count = Math.ceil(JSON.stringify(_rScreen).length / 4);
     return _rScreen;
   }
@@ -604,6 +621,9 @@ async function executeTool(name, args) {
       : items.find(c => c.title.toLowerCase() === companyName.toLowerCase()) || items[0];
     if (!company) {
       const _rLiteNotFound = { company_found: false, company_name_searched: companyName, agent_action: 'ENHANCED_DUE_DILIGENCE', kyc_confidence: 'LOW', message: 'No matching company found in UK Companies House registry.', source_url: 'api.company-information.service.gov.uk', checked_at: checkedAt, _disclaimer: LEGAL_DISCLAIMER };
+      _rLiteNotFound.hold_reason = 'Company name not found in UK Companies House registry';
+      _rLiteNotFound.retry_after = null;
+      _rLiteNotFound.escalation_path = 'Verify company name spelling and jurisdiction, or request official registration documents from counterparty';
       _rLiteNotFound.token_count = Math.ceil(JSON.stringify(_rLiteNotFound).length / 4);
       return _rLiteNotFound;
     }
@@ -628,6 +648,11 @@ async function executeTool(name, args) {
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
     };
+    if (!isActive) {
+      _rLite.hold_reason = 'Company status is ' + company.company_status + ' in UK Companies House registry -- not an active trading entity';
+      _rLite.retry_after = null;
+      _rLite.escalation_path = 'Do not proceed with payment -- verify current company status with counterparty and confirm in Companies House before proceeding';
+    }
     _rLite.token_count = Math.ceil(JSON.stringify(_rLite).length / 4);
     return _rLite;
   }
