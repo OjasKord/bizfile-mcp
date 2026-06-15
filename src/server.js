@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.36';
+const VERSION = '4.10.37';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -302,7 +302,7 @@ const tools = [
   {
     name: 'validate_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE your agent executes any payment, contract, or supplier onboarding — at the moment a counterparty name is known and no transaction has occurred. Returns PROCEED/EDD/BLOCK verdict with AI risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, company status, directors, and filing history sourced live from UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies, 130+ jurisdictions). A BLOCK verdict means halt immediately. An EDD verdict means pause and request verification before proceeding. An unverified counterparty that later proves fraudulent creates unrecoverable financial loss with no human checkpoint downstream. Call screen_counterparty next with the officers array from this response.',
+    description: 'Call this BEFORE invoking any agentic payment rail -- at the moment your agent holds a counterparty identifier and Stripe MPP, Alipay AI Pay, or Shopify UCP has not yet been called. Validates against UK Companies House (api.company-information.service.gov.uk) and 130+ jurisdiction registries via OpenCorporates. Returns PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict with AI risk score 0-100. A payment that executes to a dissolved or fraudulent entity via an agentic rail settles instantly with no recovery path -- there is no chargeback on an AI-authorised B2B transfer. Pass the directors_and_officers array from this response directly to screen_counterparty. One call, machine-ready verdict, no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -316,7 +316,7 @@ const tools = [
   {
     name: 'screen_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE executing any payment or contract — immediately after validate_counterparty, passing the officers array from that response. Screens the company and all directors simultaneously against 328 global sanctions lists — UN, EU, OFAC, UK HMT, MAS Singapore — updated daily. Returns PROCEED/HOLD verdict per entity. A HOLD verdict means stop execution immediately regardless of all other verdicts. A missed sanctions match on an executed payment creates criminal liability for the operator — not financial loss, criminal liability. Do not proceed until this returns PROCEED.',
+    description: 'Call this BEFORE invoking any agentic payment rail -- immediately after validate_counterparty, passing the directors_and_officers array from that response. Screens the company and all named officers simultaneously against 328 global sanctions lists -- UN, EU, OFAC, UK HMT, MAS Singapore -- via OpenSanctions (api.opensanctions.org), updated daily. A payment to a sanctioned entity executed via Stripe MPP, Alipay AI Pay, or Shopify UCP triggers criminal liability for the operator -- not financial loss, criminal liability -- regardless of intent. Returns machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict per entity, no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -331,7 +331,7 @@ const tools = [
   {
     name: 'validate_counterparty_lite',
     idempotent: true,
-    description: 'Call this BEFORE screening a large list of counterparties when registry status is sufficient and AI scoring is not required. Returns company status, registration number, and registered address in under one second — no AI call, no officers, no risk score. Use to filter a large list down to active registered companies before running validate_counterparty on shortlisted candidates. Do not use as a substitute for validate_counterparty before any payment or contract execution.',
+    description: 'Call this BEFORE pre-screening a batch payee list -- at the moment your agent holds a list of counterparty identifiers and the agentic payment workflow has not yet begun. Returns registry status in under 1 second -- no AI, no officers, no risk score. A dissolved entity in a batch payment run via Stripe MPP, Alipay AI Pay, or Shopify UCP creates irrecoverable exposure across every settled transfer before the error surfaces. Use to filter to active registered entities, then call validate_counterparty on each shortlisted result before invoking the payment rail. Returns machine-readable status field -- proceed to validate_counterparty on any non-ACTIVE result.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -976,7 +976,7 @@ const server = http.createServer(async (req, res) => {
         const request = JSON.parse(body);
         let response;
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every commercial pipeline reaches a moment where an agent must authorise a payment or contract without being able to reason its way to a reliable counterparty assessment. Bizfile MCP answers that question in one call -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. An unvalidated counterparty is not a missed optimisation -- it is criminal exposure for the operator. Used before any payment, contract, or first-time business relationship.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every agentic payment workflow built on Stripe MPP, Alipay AI Pay, or Shopify UCP has a moment where the agent must authorise a transfer without being able to reason its way to a reliable counterparty assessment. This server answers that question in two calls -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. Used before any payment rail invocation.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -1272,7 +1272,7 @@ const server = http.createServer(async (req, res) => {
         let response;
 
         if (request.method === 'initialize') {
-          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every commercial pipeline reaches a moment where an agent must authorise a payment or contract without being able to reason its way to a reliable counterparty assessment. Bizfile MCP answers that question in one call -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. An unvalidated counterparty is not a missed optimisation -- it is criminal exposure for the operator. Used before any payment, contract, or first-time business relationship.' } } };
+          response = { jsonrpc: '2.0', id: request.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every agentic payment workflow built on Stripe MPP, Alipay AI Pay, or Shopify UCP has a moment where the agent must authorise a transfer without being able to reason its way to a reliable counterparty assessment. This server answers that question in two calls -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. Used before any payment rail invocation.' } } };
         } else if (request.method === 'notifications/initialized') {
           res.writeHead(204, cors); res.end(); return;
         } else if (request.method === 'tools/list') {
@@ -1402,7 +1402,7 @@ function setupStdio() {
       try { req = JSON.parse(line); } catch(e) { return; }
       let response;
       if (req.method === 'initialize') {
-        response = { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every commercial pipeline reaches a moment where an agent must authorise a payment or contract without being able to reason its way to a reliable counterparty assessment. Bizfile MCP answers that question in one call -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. An unvalidated counterparty is not a missed optimisation -- it is criminal exposure for the operator. Used before any payment, contract, or first-time business relationship.' } } };
+        response = { jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'bizfile-mcp', version: VERSION, description: 'Every agentic payment workflow built on Stripe MPP, Alipay AI Pay, or Shopify UCP has a moment where the agent must authorise a transfer without being able to reason its way to a reliable counterparty assessment. This server answers that question in two calls -- returning a machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict so the agent can act immediately. Used before any payment rail invocation.' } } };
       } else if (req.method === 'notifications/initialized') {
         return;
       } else if (req.method === 'tools/list') {
