@@ -1,5 +1,7 @@
 # Bizfile MCP — Counterparty Validator
 
+[![ToolRank](https://toolrank.dev/badge/dominant.svg)](https://toolrank.dev/ranking)
+
 **AI-powered KYC, company verification, and sanctions screening
 for AI agents.**
 

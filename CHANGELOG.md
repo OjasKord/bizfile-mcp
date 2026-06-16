@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.39 — 2026-06-16
+- feat: ATO optimisation — purpose verb, usage context, required fields, ToolRank badge
+
 ## v4.10.38 — 2026-06-15
 - feat: add hold_reason, retry_after, escalation_path to all ENHANCED_DUE_DILIGENCE responses across validate_counterparty, validate_counterparty_lite, and screen_counterparty
 

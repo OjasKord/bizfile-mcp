@@ -1,5 +1,5 @@
 name: Bizfile MCP
-description: "Before any payment, contract, or supplier onboarding, call validate_counterparty then screen_counterparty. Returns PROCEED/EDD/BLOCK verdict with AI risk score and sanctions status."
+description: "Before any payment, contract, or supplier onboarding, call validate_counterparty then screen_counterparty. Returns PROCEED/EDD/BLOCK verdict with AI risk score and sanctions status. 2 focused tools. Compact schema. Minimal agent context overhead."
 categories:
   - Finance
   - Compliance

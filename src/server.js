@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.38';
+const VERSION = '4.10.39';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -302,7 +302,7 @@ const tools = [
   {
     name: 'validate_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE invoking any agentic payment rail -- at the moment your agent holds a counterparty identifier and Stripe MPP, Alipay AI Pay, or Shopify UCP has not yet been called. Validates against UK Companies House (api.company-information.service.gov.uk) and 130+ jurisdiction registries via OpenCorporates. Returns PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict with AI risk score 0-100. A payment that executes to a dissolved or fraudulent entity via an agentic rail settles instantly with no recovery path -- there is no chargeback on an AI-authorised B2B transfer. Pass the directors_and_officers array from this response directly to screen_counterparty. One call, machine-ready verdict, no further analysis needed.',
+    description: 'Validates counterparty legitimacy. Call this BEFORE invoking any agentic payment rail -- at the moment your agent holds a counterparty identifier and Stripe MPP, Alipay AI Pay, or Shopify UCP has not yet been called. Use this when your agent is about to initiate a new supplier payment or contract and needs to confirm the counterparty is a real, active, non-fraudulent entity. Validates against UK Companies House (api.company-information.service.gov.uk) and 130+ jurisdiction registries via OpenCorporates. Returns PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict with AI risk score 0-100. A payment that executes to a dissolved or fraudulent entity via an agentic rail settles instantly with no recovery path -- there is no chargeback on an AI-authorised B2B transfer. Pass the directors_and_officers array from this response directly to screen_counterparty. One call, machine-ready verdict, no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -316,7 +316,7 @@ const tools = [
   {
     name: 'screen_counterparty',
     idempotent: true,
-    description: 'Call this BEFORE invoking any agentic payment rail -- immediately after validate_counterparty, passing the directors_and_officers array from that response. Screens the company and all named officers simultaneously against 328 global sanctions lists -- UN, EU, OFAC, UK HMT, MAS Singapore -- via OpenSanctions (api.opensanctions.org), updated daily. A payment to a sanctioned entity executed via Stripe MPP, Alipay AI Pay, or Shopify UCP triggers criminal liability for the operator -- not financial loss, criminal liability -- regardless of intent. Returns machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict per entity, no further analysis needed.',
+    description: 'Checks counterparty sanctions status. Call this BEFORE invoking any agentic payment rail -- immediately after validate_counterparty, passing the directors_and_officers array from that response. Use this when validate_counterparty has cleared the entity but you still need to confirm the company and all its officers are not on any global sanctions list. Screens the company and all named officers simultaneously against 328 global sanctions lists -- UN, EU, OFAC, UK HMT, MAS Singapore -- via OpenSanctions (api.opensanctions.org), updated daily. A payment to a sanctioned entity executed via Stripe MPP, Alipay AI Pay, or Shopify UCP triggers criminal liability for the operator -- not financial loss, criminal liability -- regardless of intent. Returns machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict per entity, no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -331,7 +331,7 @@ const tools = [
   {
     name: 'validate_counterparty_lite',
     idempotent: true,
-    description: 'Call this BEFORE pre-screening a batch payee list -- at the moment your agent holds a list of counterparty identifiers and the agentic payment workflow has not yet begun. Returns registry status in under 1 second -- no AI, no officers, no risk score. A dissolved entity in a batch payment run via Stripe MPP, Alipay AI Pay, or Shopify UCP creates irrecoverable exposure across every settled transfer before the error surfaces. Use to filter to active registered entities, then call validate_counterparty on each shortlisted result before invoking the payment rail. Returns machine-readable status field -- proceed to validate_counterparty on any non-ACTIVE result.',
+    description: 'Validates counterparty registry status. Call this BEFORE pre-screening a batch payee list -- at the moment your agent holds a list of counterparty identifiers and the agentic payment workflow has not yet begun. Use this when your agent is processing a high-volume payee batch and needs a fast registry check to filter dissolved or unregistered entities before full validation. Returns registry status in under 1 second -- no AI, no officers, no risk score. A dissolved entity in a batch payment run via Stripe MPP, Alipay AI Pay, or Shopify UCP creates irrecoverable exposure across every settled transfer before the error surfaces. Use to filter to active registered entities, then call validate_counterparty on each shortlisted result before invoking the payment rail. Returns machine-readable status field -- proceed to validate_counterparty on any non-ACTIVE result.',
     inputSchema: {
       type: 'object',
       properties: {
