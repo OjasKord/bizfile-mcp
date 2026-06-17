@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.41';
+const VERSION = '4.10.42';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -225,8 +225,11 @@ async function sendEmail(to, subject, html) {
     const req = https.request({
       hostname: 'api.resend.com', path: '/emails', method: 'POST',
       headers: { 'Authorization': 'Bearer ' + RESEND_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })); });
-    req.on('error', e => resolve({ error: e.message }));
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => {
+      if (res.statusCode < 200 || res.statusCode >= 300) console.error('[Resend] Email failed: HTTP ' + res.statusCode + ' ' + d);
+      resolve({ status: res.statusCode, body: d });
+    }); });
+    req.on('error', e => { console.error('[Resend] Email network error:', e.message); resolve({ error: e.message }); });
     req.write(body); req.end();
   });
 }
@@ -830,7 +833,11 @@ async function handleStripeWebhook(body, sig) {
       };
       apiKeys.set(apiKey, record);
       await saveKeyToRedis(apiKey, record, REDIS_PREFIX);
-      await sendApiKeyEmail(record.email, apiKey, plan);
+      if (record.email && record.email !== 'unknown') {
+        await sendApiKeyEmail(record.email, apiKey, plan);
+      } else {
+        console.error('[bizfile] No customer email in webhook — skipping email send');
+      }
       console.log('[bizfile] API key created for ' + record.email + ' (' + plan + ')');
       return { success: true, email: record.email, plan };
     }
