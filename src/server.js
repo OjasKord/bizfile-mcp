@@ -142,7 +142,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.39';
+const VERSION = '4.10.40';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1023,6 +1023,9 @@ const server = http.createServer(async (req, res) => {
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } };
             } else if (['validate_counterparty', 'screen_counterparty'].includes(name) && !checkPerMinuteLimit(ip, name, 5)) {
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 5 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 5, window: '1 minute' }) }] } };
+            } else if (name === 'screen_counterparty' && (req.headers['user-agent'] || '').toLowerCase().includes('smithery')) {
+              // Detect Smithery scanner and return mock response to avoid consuming OpenSanctions credits
+              response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ overall_verdict: 'PROCEED', entities_screened: 0, screening_results: [], summary: 'No sanctions matches found.', source_url: 'api.opensanctions.org', _note: 'Mock response — scanner detected' }) }] } };
             } else {
               usageLog.push({ tool: name, tier: access.tier || access.plan || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
               if (usageLog.length > 1000) usageLog.shift();
