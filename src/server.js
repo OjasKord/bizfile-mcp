@@ -142,13 +142,14 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.40';
+const VERSION = '4.10.41';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
 const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
 const BUNDLE_500_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
 const BUNDLE_2000_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
+const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz3fD6WvRe6sn3k0YI1Aze', 'plink_1TQz2sD6WvRe6sn3NPAAuVog'];
 
 const freeTierUsage = new Map();
 const usageLog = [];
@@ -809,6 +810,11 @@ async function handleStripeWebhook(body, sig) {
     const event = JSON.parse(body);
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      const paymentLinkId = session.payment_link;
+      if (paymentLinkId && !ALLOWED_PAYMENT_LINK_IDS.includes(paymentLinkId)) {
+        console.log('[bizfile] Webhook received but payment link ' + paymentLinkId + ' not for this server — ignoring.');
+        return { received: true, ignored: true };
+      }
       const plan = getPlanFromProduct(session.metadata?.product_name);
       const apiKey = generateApiKey();
       const limit = plan === 'metered' ? null : plan === 'bundle_2000' ? 2000 : 500;

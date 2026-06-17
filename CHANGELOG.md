@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.41 — 2026-06-17
+- fix: Stripe webhook now validates payment_link ID — ignores events not belonging to this server
+
 ## v4.10.40 — 2026-06-17
 - feat: SmitheryBot detection on screen_counterparty — returns mock PROCEED verdict without consuming OpenSanctions credits
 
