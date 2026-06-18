@@ -74,6 +74,17 @@ async function redisExpire(key, seconds) {
   } catch(e) { console.error('[Redis] redisExpire failed:', e); }
 }
 
+async function redisDelete(key) {
+  try {
+    const res = await fetch(
+      `${UPSTASH_URL}/del/${encodeURIComponent(key)}`,
+      { method: 'POST', headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } }
+    );
+    const data = await res.json();
+    if (data.error) console.error('[Redis] redisDelete error:', data.error, 'key:', key);
+  } catch(e) { console.error('[Redis] redisDelete failed:', e); }
+}
+
 async function appendSessionLog(ip, tool) {
   try {
     const ipSafe = ip.replace(/:/g, '_').replace(/\s/g, '');
@@ -142,7 +153,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.42';
+const VERSION = '4.10.43';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -852,6 +863,40 @@ async function handleStripeWebhook(body, sig) {
         }
       }
       return { received: true, type: event.type };
+    }
+    if (event.type === 'charge.refunded') {
+      if (!process.env.STRIPE_SECRET_KEY) {
+        console.error('[bizfile] STRIPE_SECRET_KEY not set — cannot revoke key on refund');
+        return { received: true, ignored: true };
+      }
+      const paymentIntentId = event.data.object.payment_intent;
+      if (!paymentIntentId) {
+        console.log('[bizfile] charge.refunded missing payment_intent — ignoring.');
+        return { received: true, ignored: true };
+      }
+      try {
+        const sessions = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId, limit: 1 });
+        const email = sessions.data[0]?.customer_details?.email;
+        if (!email) {
+          console.log('[bizfile] No checkout session/email found for refunded payment_intent ' + paymentIntentId);
+          return { received: true, ignored: true };
+        }
+        let revokedKey = null;
+        for (const [key, record] of apiKeys.entries()) {
+          if (record.email === email) { revokedKey = key; break; }
+        }
+        if (!revokedKey) {
+          console.log('[bizfile] No API key found for ' + email + ' — refund received, nothing to revoke');
+          return { received: true, ignored: true };
+        }
+        apiKeys.delete(revokedKey);
+        await redisDelete(`${REDIS_PREFIX}:key:${revokedKey}`);
+        console.log('[Webhook] API key revoked for ' + email + ' — refund received');
+        return { received: true, revoked: true };
+      } catch(e) {
+        console.error('[bizfile] charge.refunded handling error:', e.message);
+        return { received: true, ignored: true };
+      }
     }
     return { received: true, type: event.type };
   } catch(e) { console.error('[bizfile] Webhook error:', e.message); return { error: e.message, status: 400 }; }
