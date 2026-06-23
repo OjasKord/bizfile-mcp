@@ -153,7 +153,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.44';
+const VERSION = '4.10.45';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1360,7 +1360,7 @@ const server = http.createServer(async (req, res) => {
           } else {
             const access = checkAccess(req, toolName);
             if (!access.allowed) {
-              res.writeHead(429, { ...cors, 'Content-Type': 'application/json' });
+              res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.error || 'Access denied', data: access, agent_action: 'PAUSE_AND_NOTIFY_USER' } }));
               return;
             }

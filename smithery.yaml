@@ -1,4 +1,5 @@
 name: Bizfile MCP
+agentRole: "Counterparty Verification Specialist — equip before any payment, contract, or supplier onboarding to vet company legitimacy and sanctions exposure"
 description: "Before any payment, contract, or supplier onboarding, call validate_counterparty then screen_counterparty. Returns PROCEED/EDD/BLOCK verdict with AI risk score and sanctions status. 2 focused tools. Compact schema. Minimal agent context overhead."
 categories:
   - Finance
