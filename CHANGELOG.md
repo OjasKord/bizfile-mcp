@@ -5,6 +5,14 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.46 — 2026-06-24
+- feat: unauthenticated /public-stats endpoint -- first_deployed, lifetime tool calls, uptime %, version, for agent orchestrators evaluating server trustworthiness
+- feat: /process-trial-followups endpoint + 24h follow-up record on trial-extension grant
+- feat: gate responses now self-contained (server + workflow impact + upgrade path in one sentence) and detect cross-server operators via shared fleet Redis, with cross-server trial-extension note
+- feat: outputSchema added to all 3 tools (additive, response format unchanged)
+- fix: validate_counterparty description and LEGAL_DISCLAIMER falsely claimed OpenCorporates, Singapore ACRA, and US SEC EDGAR -- none of these are ever called in code, only UK Companies House is. Removed from description, disclaimer, glama.json, server.json, README. Also removed the dead jurisdiction input parameter.
+- chore: removed dead test.js (tested OpenCorporates integration that was never wired into the live server)
+
 ## v4.10.45 — 2026-06-23
 - fix: gate returns HTTP 402 (x402 standard for non-transient quota)
 

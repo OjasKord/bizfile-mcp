@@ -5,10 +5,10 @@
 **AI-powered KYC, company verification, and sanctions screening
 for AI agents.**
 
-Real-time counterparty verification across 210M+ companies in
-130+ jurisdictions, with AI risk scoring and sanctions screening
-against 328 global lists. Built for supplier onboarding agents,
-payment approval workflows, and AML compliance pipelines.
+Real-time counterparty verification against UK Companies House,
+with AI risk scoring and sanctions screening against 328 global
+lists. Built for supplier onboarding agents, payment approval
+workflows, and AML compliance pipelines.
 
 ## What This Solves
 
@@ -21,8 +21,6 @@ registry data or current sanctions lists from training data.
 This tool calls authoritative sources directly:
 
 - **UK Companies House API** — live filing data, officer history
-- **Singapore ACRA** — real-time business registry
-- **OpenCorporates** — 210M+ companies, 130+ jurisdictions
 - **OpenSanctions** — 328 global sanctions lists, updated daily
 
 ## Tools
@@ -64,8 +62,9 @@ mcp_server = MCPServerSse(
 | Tier | Calls | Price |
 |---|---|---|
 | Free | 20/month | No card required |
-| Pro | Unlimited | $299/month |
-| Enterprise | Unlimited + priority | $999/month |
+| Bundle 500 | 500, never expire | $20 |
+| Bundle 2000 | 2,000, never expire | $70 |
+| Pay-as-you-go | Metered | $0.019/query (validate_counterparty), $0.008/query (lite), $0.50/screen (sanctions) |
 
 Upgrade: https://kordagencies.com
 
@@ -73,8 +72,7 @@ Upgrade: https://kordagencies.com
 
 company verification MCP · KYC check agent · sanctions screening
 MCP · AML compliance tool · counterparty due diligence ·
-Companies House API · Singapore ACRA lookup · OpenCorporates MCP ·
-supplier onboarding agent · payment verification MCP ·
+Companies House API · supplier onboarding agent · payment verification MCP ·
 OFAC screening · MAS Singapore sanctions · UK company check ·
 corporate intelligence agent · counterparty risk scoring ·
 AI KYC tool · know your customer API · business verification

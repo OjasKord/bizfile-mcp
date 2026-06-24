@@ -1,7 +1,7 @@
 {
   "$schema": "https://glama.ai/mcp/servers/schema.json",
   "name": "Bizfile MCP — Counterparty Validator",
-  "description": "AI-powered KYC and sanctions screening via UK Companies House, Singapore ACRA, OpenCorporates (210M+ companies, 130+ jurisdictions) and 328 global sanctions lists. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100.",
+  "description": "AI-powered KYC and sanctions screening via UK Companies House and 328 global sanctions lists. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100.",
   "license": "MIT",
   "categories": [
     "finance",
@@ -15,7 +15,7 @@
   "tools": [
     {
       "name": "validate_counterparty",
-      "description": "AI-powered KYC and company verification across UK Companies House, Singapore ACRA, and OpenCorporates (210M+ companies). Returns risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, PROCEED/EDD/BLOCK verdict."
+      "description": "AI-powered KYC and company verification via UK Companies House. Returns risk score 0-100, KYC confidence HIGH/MEDIUM/LOW, PROCEED/EDD/BLOCK verdict."
     },
     {
       "name": "validate_counterparty_lite",

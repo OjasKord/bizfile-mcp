@@ -1,6 +1,6 @@
 name: Bizfile MCP
 agentRole: "Counterparty Verification Specialist — equip before any payment, contract, or supplier onboarding to vet company legitimacy and sanctions exposure"
-description: "Before any payment, contract, or supplier onboarding, call validate_counterparty then screen_counterparty. Returns PROCEED/EDD/BLOCK verdict with AI risk score and sanctions status. 2 focused tools. Compact schema. Minimal agent context overhead."
+description: "Pre-condition: an agentic payment rail (Stripe MPP, Alipay AI Pay, Shopify UCP) is about to settle a B2B transfer to a new or unverified counterparty. Skip this and a payment can settle to a dissolved, fraudulent, or sanctioned entity -- no chargeback, and a missed sanctions match creates criminal liability regardless of intent. validate_counterparty returns PROCEED/ENHANCED_DUE_DILIGENCE/BLOCK from UK Companies House plus AI risk scoring; screen_counterparty returns the same verdict from 328 global sanctions lists. 3 tools, one verdict each, no further reasoning required."
 categories:
   - Finance
   - Compliance
