@@ -212,9 +212,11 @@ const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
 // Source count for OpenSanctions' /match/default collection (sanctions + PEPs + crime + debarment, not sanctions-only).
 // Check quarterly at opensanctions.org/datasets/default -- not fetched at runtime to avoid a boot-time dependency on OpenSanctions.
 const OPENSANCTIONS_SOURCE_COUNT = 386;
+// Caching/staleness policy per tool, in seconds. screen_counterparty is shorter because OpenSanctions updates daily.
+const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.46';
+const VERSION = '4.10.47';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -563,6 +565,8 @@ async function executeTool(name, args) {
         hold_reason: 'Company name not found in UK Companies House registry -- may be registered in a different jurisdiction or trading under an alias',
         retry_after: null,
         escalation_path: 'Request official certificate of incorporation from counterparty and verify in their registered jurisdiction before proceeding',
+        verdict_ttl: VERDICT_TTL.validate_counterparty,
+        data_source_status: 'full',
         source_url: 'api.company-information.service.gov.uk',
         checked_at: checkedAt,
         _disclaimer: LEGAL_DISCLAIMER
@@ -605,11 +609,13 @@ async function executeTool(name, args) {
       '{"risk_score":<0-100>,"risk_level":"LOW|MEDIUM|HIGH|CRITICAL","risk_factors":[<up to 5 specific factors>],"positive_indicators":[<up to 3>],"recommended_actions":[<up to 3 specific actions>],"summary":"<2 sentences max>"}';
 
     let aiRisk = { risk_score: 50, risk_level: 'MEDIUM', risk_factors: ['AI analysis unavailable — manual review recommended'], positive_indicators: [], recommended_actions: ['Conduct manual due diligence'], summary: 'AI risk scoring temporarily unavailable. Manual review required before proceeding.' };
+    let aiRiskDegraded = false;
     try {
       const aiResponse = await callClaude(aiPrompt);
       aiRisk = JSON.parse(aiResponse.replace(/```json|```/g, '').trim());
     } catch(e) {
       console.error('AI risk scoring error:', e.message);
+      aiRiskDegraded = true;
     }
 
     const _rValidate = {
@@ -643,6 +649,8 @@ async function executeTool(name, args) {
       total_officers: officers.length,
       // Sanctions note
       sanctions_screening_note: 'Registry validation complete. Run screen_counterparty to check this company and all directors against ' + OPENSANCTIONS_SOURCE_COUNT + ' risk data sources before proceeding.',
+      verdict_ttl: VERDICT_TTL.validate_counterparty,
+      data_source_status: aiRiskDegraded ? 'partial' : 'full',
       // Standard fields
       source_url: 'api.company-information.service.gov.uk',
       checked_at: checkedAt,
@@ -678,6 +686,7 @@ async function executeTool(name, args) {
     let overallVerdict = 'PROCEED';
     let blockCount = 0;
     let eddCount = 0;
+    let openSanctionsFailed = false;
 
     // Screen each entity sequentially to respect API limits
     for (const entity of entitiesToScreen) {
@@ -692,6 +701,7 @@ async function executeTool(name, args) {
         });
         overallVerdict = 'ENHANCED_DUE_DILIGENCE';
         eddCount++;
+        openSanctionsFailed = true;
         continue;
       }
 
@@ -764,6 +774,8 @@ async function executeTool(name, args) {
         ? 'Conduct enhanced due diligence. Obtain additional documentation. Consider escalating to compliance officer before proceeding.'
         : 'Sanctions check passed. Proceed subject to other due diligence requirements.',
       screening_results: screeningResults,
+      verdict_ttl: VERDICT_TTL.screen_counterparty,
+      data_source_status: openSanctionsFailed ? 'degraded' : 'full',
       source_url: 'api.opensanctions.org',
       lists_checked: OPENSANCTIONS_SOURCE_COUNT,
       checked_at: checkedAt,
@@ -802,6 +814,8 @@ async function executeTool(name, args) {
       _rLiteNotFound.hold_reason = 'Company name not found in UK Companies House registry';
       _rLiteNotFound.retry_after = null;
       _rLiteNotFound.escalation_path = 'Verify company name spelling and jurisdiction, or request official registration documents from counterparty';
+      _rLiteNotFound.verdict_ttl = VERDICT_TTL.validate_counterparty_lite;
+      _rLiteNotFound.data_source_status = 'full';
       _rLiteNotFound.token_count = Math.ceil(JSON.stringify(_rLiteNotFound).length / 4);
       return _rLiteNotFound;
     }
@@ -822,6 +836,8 @@ async function executeTool(name, args) {
       kyc_confidence: kycConfidence,
       active: isActive,
       analysis_type: 'Registry lookup only -- no AI analysis. Use validate_counterparty for full AI risk scoring.',
+      verdict_ttl: VERDICT_TTL.validate_counterparty_lite,
+      data_source_status: 'full',
       source_url: 'api.company-information.service.gov.uk',
       checked_at: checkedAt,
       _disclaimer: LEGAL_DISCLAIMER
@@ -1340,6 +1356,7 @@ const server = http.createServer(async (req, res) => {
                 const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
                 reportMeteredUsage(access.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
               }
+              result.calls_remaining = access.paid ? 'unlimited' : Math.max(0, access.remaining || 0);
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
             }
           }
@@ -1625,6 +1642,7 @@ const server = http.createServer(async (req, res) => {
           const result = await executeTool(name, args || {});
           if (req._accessWarning) result._notice = req._accessWarning;
           if (sanctionsMeta && sanctionsMeta.plan !== 'metered') result._billing = { checks_used: sanctionsMeta.checks_used, checks_remaining: sanctionsMeta.checks_remaining, checks_limit: sanctionsMeta.checks_limit, cost_this_call: sanctionsMeta.cost_this_call };
+          result.calls_remaining = sanctionsMeta ? 'unlimited' : (req._accessResult && req._accessResult.paid ? 'unlimited' : Math.max(0, (req._accessResult && req._accessResult.remaining) || 0));
 
           const accessResult = req._accessResult || sanctionsMeta;
           if (accessResult && accessResult.plan === 'metered' && accessResult.stripeCustomerId) {
@@ -1751,6 +1769,7 @@ function setupStdio() {
             response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'This tool is temporarily unavailable for maintenance.', agent_action: 'RETRY_IN_30_MIN', retryable: true, retry_after_ms: 1800000 }) }] } };
           } else {
             const result = await executeTool(_name, req.params.arguments || {});
+            result.calls_remaining = 'unlimited';
             response = { jsonrpc: '2.0', id: req.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
           }
         } catch(e) {

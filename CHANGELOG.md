@@ -5,6 +5,12 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.47 — 2026-06-25
+- fix: stale "328 global sanctions lists" claim corrected to "386 risk data sources" (OpenSanctions /match/default source count) across src/server.js, smithery.yaml, glama.json, README.md, CHANGELOG.md, package.json, server.json. Source count now a single named constant (OPENSANCTIONS_SOURCE_COUNT), check quarterly.
+- feat: calls_remaining field added to every successful tool response -- "unlimited" for paid keys, numeric free-tier headroom otherwise
+- feat: verdict_ttl field added to validate_counterparty, validate_counterparty_lite (2592000s/30d) and screen_counterparty (86400s/24h) responses, signalling caching orchestrators how long to trust a verdict
+- feat: data_source_status field added (full/degraded/partial) -- screen_counterparty reports "degraded" when OpenSanctions fails for any entity (critical source), validate_counterparty reports "partial" when AI risk scoring falls back to default (non-critical source)
+
 ## v4.10.46 — 2026-06-24
 - feat: unauthenticated /public-stats endpoint -- first_deployed, lifetime tool calls, uptime %, version, for agent orchestrators evaluating server trustworthiness
 - feat: /process-trial-followups endpoint + 24h follow-up record on trial-extension grant
