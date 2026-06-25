@@ -206,7 +206,7 @@ discovery rewrite: tool descriptions rewritten with workflow triggers and conseq
 
 ### Changed
 - All tool descriptions broadened beyond trade finance to cover any B2B workflow
-- `screen_entity` description updated to highlight 328 global sanctions lists with named sources
+- `screen_entity` description updated to highlight 386 risk data sources with named sources
 
 ---
 
@@ -239,7 +239,7 @@ discovery rewrite: tool descriptions rewritten with workflow triggers and conseq
 ## v4.1.0 — 2026-04-03
 
 ### Added
-- `screen_entity` tool — sanctions screening across 328 global lists via OpenSanctions API
+- `screen_entity` tool — risk screening across 386 data sources via OpenSanctions API
 - Per-check billing metadata in response (`_billing` field)
 - Sanctions cap enforcement: 500/month Pro, 2,000/month Enterprise
 - Legal notice in `screen_entity` description and response

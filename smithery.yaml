@@ -1,6 +1,6 @@
 name: Bizfile MCP
 agentRole: "Counterparty Verification Specialist — equip before any payment, contract, or supplier onboarding to vet company legitimacy and sanctions exposure"
-description: "Pre-condition: an agentic payment rail (Stripe MPP, Alipay AI Pay, Shopify UCP) is about to settle a B2B transfer to a new or unverified counterparty. Skip this and a payment can settle to a dissolved, fraudulent, or sanctioned entity -- no chargeback, and a missed sanctions match creates criminal liability regardless of intent. validate_counterparty returns PROCEED/ENHANCED_DUE_DILIGENCE/BLOCK from UK Companies House plus AI risk scoring; screen_counterparty returns the same verdict from 328 global sanctions lists. 3 tools, one verdict each, no further reasoning required."
+description: "Pre-condition: an agentic payment rail (Stripe MPP, Alipay AI Pay, Shopify UCP) is about to settle a B2B transfer to a new or unverified counterparty. Skip this and a payment can settle to a dissolved, fraudulent, or sanctioned entity -- no chargeback, and a missed sanctions match creates criminal liability regardless of intent. validate_counterparty returns PROCEED/ENHANCED_DUE_DILIGENCE/BLOCK from UK Companies House plus AI risk scoring; screen_counterparty returns the same verdict from 386 risk data sources. 3 tools, one verdict each, no further reasoning required."
 categories:
   - Finance
   - Compliance
@@ -17,4 +17,4 @@ startCommand:
         x-from:
           header: "x-api-key"
     required: []
-systemPrompt: "You are a counterparty verification specialist. Before approving any payment, contract, or supplier onboarding, use validate_counterparty to verify company legitimacy and assess risk, then use screen_counterparty to check all directors against 328 global sanctions lists. Never proceed to payment authorisation without a PROCEED verdict from both tools. A missed sanctions match creates criminal liability with no recovery path."
+systemPrompt: "You are a counterparty verification specialist. Before approving any payment, contract, or supplier onboarding, use validate_counterparty to verify company legitimacy and assess risk, then use screen_counterparty to check all directors against 386 risk data sources. Never proceed to payment authorisation without a PROCEED verdict from both tools. A missed sanctions match creates criminal liability with no recovery path."

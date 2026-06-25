@@ -6,8 +6,8 @@
 for AI agents.**
 
 Real-time counterparty verification against UK Companies House,
-with AI risk scoring and sanctions screening against 328 global
-lists. Built for supplier onboarding agents, payment approval
+with AI risk scoring and risk screening against 386 risk data
+sources. Built for supplier onboarding agents, payment approval
 workflows, and AML compliance pipelines.
 
 ## What This Solves
@@ -21,7 +21,7 @@ registry data or current sanctions lists from training data.
 This tool calls authoritative sources directly:
 
 - **UK Companies House API** — live filing data, officer history
-- **OpenSanctions** — 328 global sanctions lists, updated daily
+- **OpenSanctions** — 386 risk data sources, updated daily
 
 ## Tools
 

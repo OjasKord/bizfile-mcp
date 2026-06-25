@@ -1,7 +1,7 @@
 {
   "$schema": "https://glama.ai/mcp/servers/schema.json",
   "name": "Bizfile MCP — Counterparty Validator",
-  "description": "AI-powered KYC and sanctions screening via UK Companies House and 328 global sanctions lists. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100.",
+  "description": "AI-powered KYC and risk screening via UK Companies House and 386 risk data sources. Call before payment approval or supplier onboarding. Returns PROCEED/EDD/BLOCK verdict and risk score 0-100.",
   "license": "MIT",
   "categories": [
     "finance",
@@ -23,7 +23,7 @@
     },
     {
       "name": "screen_counterparty",
-      "description": "Sanctions screening against 328 global lists including UN, EU, OFAC, UK HMT, MAS Singapore via OpenSanctions. Returns CLEAR/MATCH verdict and agent_action."
+      "description": "Risk screening against 386 data sources including UN, EU, OFAC, UK HMT, MAS Singapore via OpenSanctions. Returns CLEAR/MATCH verdict and agent_action."
     }
   ],
   "links": {
