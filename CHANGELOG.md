@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.48 — 2026-06-26
+- fix: trial extension requests now written to Redis (bizfile:trial:{email}) on grant -- permanent audit trail that survives redeploys; previously in-memory only
+
 ## v4.10.47 — 2026-06-25
 - fix: stale "328 global sanctions lists" claim corrected to "386 risk data sources" (OpenSanctions /match/default source count) across src/server.js, smithery.yaml, glama.json, README.md, CHANGELOG.md, package.json, server.json. Source count now a single named constant (OPENSANCTIONS_SOURCE_COUNT), check quarterly.
 - feat: calls_remaining field added to every successful tool response -- "unlimited" for paid keys, numeric free-tier headroom otherwise

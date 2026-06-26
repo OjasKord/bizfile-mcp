@@ -216,7 +216,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.47';
+const VERSION = '4.10.48';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1227,6 +1227,7 @@ const server = http.createServer(async (req, res) => {
         freeTierUsage.set(monthKey, Math.max(0, currentCalls - TRIAL_EXTENSION_CALLS));
         trialExtensions.set(emailKey, { name, email, use_case: use_case || '', ip, granted_at: nowISO() });
         saveStats();
+        await redisSet(REDIS_PREFIX + ':trial:' + emailNorm, { name, email, use_case: use_case || '', ip, timestamp: nowISO(), server: 'bizfile-mcp' });
         // 24h follow-up record -- processed by /process-trial-followups (fleet cron)
         await redisSet(REDIS_PREFIX + ':followup:' + emailNorm, { email, name, server: 'bizfile-mcp', granted_at: nowISO(), sent: false });
         await sendEmail('ojas@kordagencies.com', 'Bizfile MCP -- Trial Extension: ' + name,
