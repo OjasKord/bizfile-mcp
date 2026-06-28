@@ -5,6 +5,14 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.50 — 2026-06-28
+- fix: gate email dedup — notifyGateHit now writes bizfile:gate_email:{ip} to Redis with 1-hour TTL; retries within the hour suppressed (one alert per IP per hour)
+- fix: 402 gate response agent_action changed to HALT_WORKFLOW; added retryable: false, retry_after_ms: null
+- fix: trial_extension structured field added explicitly to all 402 gate responses
+
+## v4.10.49 — 2026-06-28
+- feat: owner key bypass (OWNER_KEY env var) — fleet owner bypasses free tier and paid-only gates; usage logged to bizfile:owner_calls:YYYY-MM in Redis
+
 ## v4.10.48 — 2026-06-26
 - fix: trial extension requests now written to Redis (bizfile:trial:{email}) on grant -- permanent audit trail that survives redeploys; previously in-memory only
 
