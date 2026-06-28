@@ -209,6 +209,7 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
+const OWNER_KEY = process.env.OWNER_KEY || '';
 // Source count for OpenSanctions' /match/default collection (sanctions + PEPs + crime + debarment, not sanctions-only).
 // Check quarterly at opensanctions.org/datasets/default -- not fetched at runtime to avoid a boot-time dependency on OpenSanctions.
 const OPENSANCTIONS_SOURCE_COUNT = 386;
@@ -216,7 +217,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.48';
+const VERSION = '4.10.49';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -856,6 +857,15 @@ async function executeTool(name, args) {
 
 // ─── ACCESS CONTROL ───────────────────────────────────────────────────────────
 
+async function checkOwnerKey(req, requestBody) {
+  if (!OWNER_KEY) return false;
+  const provided = req.headers['x-owner-key'] || (requestBody && requestBody.owner_key) || '';
+  if (provided !== OWNER_KEY) return false;
+  redisIncr(REDIS_PREFIX + ':owner_calls:' + new Date().toISOString().slice(0, 7)).catch(() => {});
+  console.log('[owner] owner key used');
+  return true;
+}
+
 async function checkAccess(req, toolName) {
   const rawIpAll = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
   const ipAll = rawIpAll.split(',')[0].trim();
@@ -1330,7 +1340,8 @@ const server = http.createServer(async (req, res) => {
         } else if (request.method === 'prompts/list') {
           response = { jsonrpc: '2.0', id: request.id, result: { prompts: [] } };
         } else if (request.method === 'tools/call') {
-          const access = await checkAccess(req, request.params && request.params.name);
+          const isOwner = await checkOwnerKey(req, request);
+          const access = isOwner ? { allowed: true, paid: true, plan: 'owner' } : await checkAccess(req, request.params && request.params.name);
           if (!access.allowed) {
             response = { jsonrpc: '2.0', id: request.id, error: { code: -32000, message: access.error || 'Access denied', data: access, agent_action: 'PAUSE_AND_NOTIFY_USER' } };
           } else {
@@ -1343,21 +1354,20 @@ const server = http.createServer(async (req, res) => {
             } else if (['validate_counterparty', 'screen_counterparty'].includes(name) && !checkPerMinuteLimit(ip, name, 5)) {
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 5 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 5, window: '1 minute' }) }] } };
             } else if (name === 'screen_counterparty' && (req.headers['user-agent'] || '').toLowerCase().includes('smithery')) {
-              // Detect Smithery scanner and return mock response to avoid consuming OpenSanctions credits
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ overall_verdict: 'PROCEED', entities_screened: 0, screening_results: [], summary: 'No sanctions matches found.', source_url: 'api.opensanctions.org', _note: 'Mock response — scanner detected' }) }] } };
             } else {
-              usageLog.push({ tool: name, tier: access.tier || access.plan || 'paid', time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
+              usageLog.push({ tool: name, tier: isOwner ? 'owner' : (access.tier || access.plan || 'paid'), time: new Date().toISOString(), ip: ip.slice(0, 8) + '...' });
               if (usageLog.length > 1000) usageLog.shift();
               toolUsageCounts[name] = (toolUsageCounts[name] || 0) + 1;
               saveStats();
               redisIncr(LIFETIME_CALLS_REDIS_KEY).catch(() => {});
               appendSessionLog(ip, name).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
               const result = await executeTool(name, args || {});
-              if (access.plan === 'metered' && access.stripeCustomerId) {
+              if (!isOwner && access.plan === 'metered' && access.stripeCustomerId) {
                 const evtMap = { validate_counterparty: 'bizfile_registry_query', validate_counterparty_lite: 'bizfile_lite_query', screen_counterparty: 'bizfile_sanctions_screen' };
                 reportMeteredUsage(access.stripeCustomerId, evtMap[name] || 'bizfile_registry_query').catch(() => {});
               }
-              result.calls_remaining = access.paid ? 'unlimited' : Math.max(0, access.remaining || 0);
+              result.calls_remaining = (isOwner || access.paid) ? 'unlimited' : Math.max(0, access.remaining || 0);
               response = { jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] } };
             }
           }
@@ -1597,7 +1607,11 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: 'text', text: JSON.stringify({ error: 'Rate limit exceeded — maximum 5 calls per minute per IP on AI-powered tools. Your workflow is calling this tool too rapidly.', agent_action: 'RETRY_IN_60_SEC', retryable: true, retry_after_ms: 60000, limit: 5, window: '1 minute' }) }] } }));
             return;
           }
-          if (toolName === 'screen_counterparty') {
+          const isOwner = await checkOwnerKey(req, request);
+          if (isOwner) {
+            req._tier = 'owner';
+            req._accessResult = { paid: true, plan: 'owner' };
+          } else if (toolName === 'screen_counterparty') {
             const sanctionsAccess = await checkSanctionsAccess(req);
             if (!sanctionsAccess.allowed) {
               res.writeHead(402, { ...cors, 'Content-Type': 'application/json' });
