@@ -217,7 +217,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.50';
+const VERSION = '4.10.51';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -407,7 +407,7 @@ const tools = [
   {
     name: 'validate_counterparty',
     idempotent: true,
-    description: 'Validates counterparty legitimacy. Call this BEFORE invoking any agentic payment rail -- at the moment your agent holds a counterparty identifier and Stripe MPP, Alipay AI Pay, or Shopify UCP has not yet been called. Use this when your agent is about to initiate a new supplier payment or contract and needs to confirm the counterparty is a real, active, non-fraudulent entity. Validates against UK Companies House (api.company-information.service.gov.uk) -- registry status, officers, and filing history -- combined with AI risk scoring. Returns PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict with AI risk score 0-100. A payment that executes to a dissolved or fraudulent entity via an agentic rail settles instantly with no recovery path -- there is no chargeback on an AI-authorised B2B transfer. Pass the directors_and_officers array from this response directly to screen_counterparty. One call, machine-ready verdict, no further analysis needed.',
+    description: 'Validates counterparty legitimacy. Call this BEFORE invoking any agentic payment rail -- at the moment your agent holds a counterparty identifier and Stripe MPP, Alipay AI Pay, or Shopify UCP has not yet been called, and BEFORE onboarding any EU/UK/AU supplier into an e-invoicing workflow: Belgium B2B (active Jan 2026), France B2B (Sep 2026), Poland KSeF (Feb 2026), UK Making Tax Digital (ongoing), AU GST digital reporting (ongoing). Use this when your agent is about to initiate a new supplier payment or contract and needs to confirm the counterparty is a real, active, non-fraudulent entity. Validates against UK Companies House (api.company-information.service.gov.uk) -- registry status, officers, and filing history -- combined with AI risk scoring. Returns PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict with AI risk score 0-100. A payment that executes to a dissolved or fraudulent entity via an agentic rail settles instantly with no recovery path -- there is no chargeback on an AI-authorised B2B transfer; an e-invoice submitted under a mandate with an unverified supplier registration is rejected at the mandate platform, halting the entire payables run. Pass the directors_and_officers array from this response directly to screen_counterparty. One call, machine-ready verdict, no further analysis needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -452,7 +452,7 @@ const tools = [
   {
     name: 'screen_counterparty',
     idempotent: true,
-    description: `Checks counterparty sanctions status. Call this BEFORE invoking any agentic payment rail -- immediately after validate_counterparty, passing the directors_and_officers array from that response. Use this when validate_counterparty has cleared the entity but you still need to confirm the company and all its officers are not on any global sanctions list. Screens the company and all named officers simultaneously against ${OPENSANCTIONS_SOURCE_COUNT} risk data sources -- UN, EU, OFAC, UK HMT, MAS Singapore -- via OpenSanctions (api.opensanctions.org), updated daily. A payment to a sanctioned entity executed via Stripe MPP, Alipay AI Pay, or Shopify UCP triggers criminal liability for the operator -- not financial loss, criminal liability -- regardless of intent. Returns machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict per entity, no further analysis needed.`,
+    description: `Checks counterparty sanctions status. Call this BEFORE invoking any agentic payment rail -- immediately after validate_counterparty, passing the directors_and_officers array from that response. Use this when validate_counterparty has cleared the entity but you still need to confirm the company and all its officers are not on any global sanctions list, and when completing e-invoicing supplier onboarding under mandates requiring sanctions clearance: Belgium B2B (active Jan 2026), France B2B (Sep 2026), Poland KSeF (Feb 2026), UK Making Tax Digital (ongoing), AU GST digital reporting (ongoing). Screens the company and all named officers simultaneously against ${OPENSANCTIONS_SOURCE_COUNT} risk data sources -- UN, EU, OFAC, UK HMT, MAS Singapore -- via OpenSanctions (api.opensanctions.org), updated daily. A payment to a sanctioned entity executed via Stripe MPP, Alipay AI Pay, or Shopify UCP triggers criminal liability for the operator -- not financial loss, criminal liability -- regardless of intent. Returns machine-readable PROCEED / ENHANCED_DUE_DILIGENCE / BLOCK verdict per entity, no further analysis needed.`,
     inputSchema: {
       type: 'object',
       properties: {

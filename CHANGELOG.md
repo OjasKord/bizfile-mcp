@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.51 — 2026-06-29
+- feat: tool descriptions updated — validate_counterparty and screen_counterparty now explicitly reference e-invoicing mandates: Belgium B2B (Jan 2026), France B2B (Sep 2026), Poland KSeF (Feb 2026), UK Making Tax Digital, AU GST digital reporting
+
 ## v4.10.50 — 2026-06-28
 - fix: gate email dedup — notifyGateHit now writes bizfile:gate_email:{ip} to Redis with 1-hour TTL; retries within the hour suppressed (one alert per IP per hour)
 - fix: 402 gate response agent_action changed to HALT_WORKFLOW; added retryable: false, retry_after_ms: null
