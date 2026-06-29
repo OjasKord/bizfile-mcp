@@ -217,7 +217,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.51';
+const VERSION = '4.10.52';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -1307,6 +1307,12 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/.well-known/mcp/server-card.json' && req.method === 'GET') {
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ serverInfo: { name: 'bizfile-mcp', version: VERSION }, tools: tools.map(t => ({ name: t.name, description: t.description.slice(0, 150) })), resources: [], prompts: [] }));
+    return;
+  }
+
+  if (req.url === '/.well-known/glama.json' && req.method === 'GET') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ "$schema": "https://glama.ai/mcp/schemas/connector.json", "maintainers": [{ "email": "ojas@kordagencies.com" }] }));
     return;
   }
 

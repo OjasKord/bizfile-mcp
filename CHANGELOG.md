@@ -5,6 +5,9 @@ Format: version number, date, what changed.
 
 ---
 
+## v4.10.52 — 2026-06-29
+- feat: add GET /.well-known/glama.json ownership endpoint for Glama registry verification
+
 ## v4.10.51 — 2026-06-29
 - feat: tool descriptions updated — validate_counterparty and screen_counterparty now explicitly reference e-invoicing mandates: Belgium B2B (Jan 2026), France B2B (Sep 2026), Poland KSeF (Feb 2026), UK Making Tax Digital, AU GST digital reporting
 
