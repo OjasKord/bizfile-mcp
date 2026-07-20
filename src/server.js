@@ -54,9 +54,9 @@ async function redisGet(key) {
 
 async function redisSet(key, value) {
   try {
-    const res = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`, {
+    const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}/${encodeURIComponent(JSON.stringify(value))}`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` }
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
     });
     const data = await res.json();
     if (data.error) console.error('[Redis] redisSet error:', data.error, 'key:', key);
@@ -217,7 +217,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.53';
+const VERSION = '4.10.54';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
