@@ -205,6 +205,38 @@ async function saveFreeTierToRedis() {
   } catch(e) { console.error('[FreeTier] save failed:', e); }
 }
 
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
+const OWNER_KEY = process.env.OWNER_KEY || '';
+// Source count for OpenSanctions' /match/default collection (sanctions + PEPs + crime + debarment, not sanctions-only).
+// Check quarterly at opensanctions.org/datasets/default -- not fetched at runtime to avoid a boot-time dependency on OpenSanctions.
+const OPENSANCTIONS_SOURCE_COUNT = 386;
+// Caching/staleness policy per tool, in seconds. screen_counterparty is shorter because OpenSanctions updates daily.
+const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
+const PORT = process.env.PORT || 3000;
+const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
+const VERSION = '4.10.55';
+const REDIS_PREFIX = 'bizfile';
+const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
+const FREE_TIER_LIMIT = 20;
+const FIRST_DEPLOYED = '2026-03-28T00:42:51Z';
+const LIFETIME_CALLS_REDIS_KEY = REDIS_PREFIX + ':lifetime_calls';
+const UPTIME_HEARTBEAT_KEY = REDIS_PREFIX + ':uptime:heartbeat_count';
+const UPTIME_MONITORING_START_KEY = REDIS_PREFIX + ':uptime:monitoring_started';
+const UPTIME_HEARTBEAT_INTERVAL_MS = 60000;
+const FLEET_IP24_TTL_SECONDS = 30 * 24 * 60 * 60;
+const FLEET_CROSS_SERVER_THRESHOLD = 3;
+const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
+const BUNDLE_500_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
+const BUNDLE_2000_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
+const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz3fD6WvRe6sn3k0YI1Aze', 'plink_1TQz2sD6WvRe6sn3NPAAuVog'];
+
+const freeTierUsage = new Map();
+const usageLog = [];
+const FREE_TIER_WARNING = 16;
+
 const USAGE_LOG_REDIS_KEY = REDIS_PREFIX + ':usage_log';
 const TOOL_USAGE_COUNTS_REDIS_KEY = REDIS_PREFIX + ':tool_usage_counts';
 
@@ -237,37 +269,6 @@ function recordGatedCall(ip, toolName) {
   appendSessionLog(ip, toolName).catch((e) => console.error('[SessionLog] appendSessionLog failed:', e));
 }
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const COMPANIES_HOUSE_API_KEY = process.env.COMPANIES_HOUSE_API_KEY || '';
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const OPENSANCTIONS_API_KEY = process.env.OPENSANCTIONS_API_KEY || '';
-const OWNER_KEY = process.env.OWNER_KEY || '';
-// Source count for OpenSanctions' /match/default collection (sanctions + PEPs + crime + debarment, not sanctions-only).
-// Check quarterly at opensanctions.org/datasets/default -- not fetched at runtime to avoid a boot-time dependency on OpenSanctions.
-const OPENSANCTIONS_SOURCE_COUNT = 386;
-// Caching/staleness policy per tool, in seconds. screen_counterparty is shorter because OpenSanctions updates daily.
-const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
-const PORT = process.env.PORT || 3000;
-const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.55';
-const REDIS_PREFIX = 'bizfile';
-const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
-const FREE_TIER_LIMIT = 20;
-const FIRST_DEPLOYED = '2026-03-28T00:42:51Z';
-const LIFETIME_CALLS_REDIS_KEY = REDIS_PREFIX + ':lifetime_calls';
-const UPTIME_HEARTBEAT_KEY = REDIS_PREFIX + ':uptime:heartbeat_count';
-const UPTIME_MONITORING_START_KEY = REDIS_PREFIX + ':uptime:monitoring_started';
-const UPTIME_HEARTBEAT_INTERVAL_MS = 60000;
-const FLEET_IP24_TTL_SECONDS = 30 * 24 * 60 * 60;
-const FLEET_CROSS_SERVER_THRESHOLD = 3;
-const METERED_SUBSCRIBE_URL = 'https://bizfile-mcp-production.up.railway.app/subscribe';
-const BUNDLE_500_URL = 'https://buy.stripe.com/fZu00ifYF2eV1tyaVGebu0k';
-const BUNDLE_2000_URL = 'https://buy.stripe.com/5kQ28q8wd1aR8W03teebu0j';
-const ALLOWED_PAYMENT_LINK_IDS = ['plink_1TQz3fD6WvRe6sn3k0YI1Aze', 'plink_1TQz2sD6WvRe6sn3NPAAuVog'];
-
-const freeTierUsage = new Map();
-const usageLog = [];
-const FREE_TIER_WARNING = 16;
 const apiKeys = new Map();
 const toolUsageCounts = {};
 const trialExtensions = new Map();
