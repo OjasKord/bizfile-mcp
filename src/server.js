@@ -217,7 +217,7 @@ const OPENSANCTIONS_SOURCE_COUNT = 386;
 const VERDICT_TTL = { validate_counterparty: 2592000, validate_counterparty_lite: 2592000, screen_counterparty: 86400 };
 const PORT = process.env.PORT || 3000;
 const STATS_KEY = process.env.STATS_KEY || 'ojas2026';
-const VERSION = '4.10.56';
+const VERSION = '4.10.57';
 const REDIS_PREFIX = 'bizfile';
 const FREE_TIER_REDIS_KEY = 'bizfile:free_tier_usage';
 const FREE_TIER_LIMIT = 20;
@@ -397,7 +397,7 @@ async function sendApiKeyEmail(email, apiKey, plan) {
 
 async function callClaude(prompt) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2048, messages: [{ role: 'user', content: prompt }] });
+    const body = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 900, messages: [{ role: 'user', content: prompt }] });
     const req = https.request({
       hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
